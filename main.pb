@@ -65,30 +65,30 @@ EndProcedure
 
 Procedure BringWindowToFrontHandlXe(hWnd)
   Protected fgThread, targetThread
-
+  
   If IsWindow_(hWnd) = 0
     ProcedureReturn
   EndIf
-
+  
   targetThread = GetWindowThreadProcessId_(hWnd, 0)
   fgThread = GetWindowThreadProcessId_(GetForegroundWindow_(), 0)
-
+  
   ; Temporarily attach input so we can set foreground properly
   If targetThread <> fgThread
     AttachThreadInput_(fgThread, targetThread, #True)
   EndIf
-
+  
   ; Show window if hidden (avoids transition)
   ;ShowWindow_(hWnd, #SW_SHOW)
-
+  
   ; Bring to front and activate
-
-SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
-
-;SetForegroundWindow_(hWnd)
+  
+  SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
+  
+  ;SetForegroundWindow_(hWnd)
   ;SetFocus_(hWnd)
- ; BringWindowToTop_(hWnd)
-
+  ; BringWindowToTop_(hWnd)
+  
   If targetThread <> fgThread
     AttachThreadInput_(fgThread, targetThread, #False)
   EndIf
@@ -105,20 +105,20 @@ Procedure BringWindowToFrontHandle(hWnd)
     ShowWindow_(hWnd, #SW_RESTORE)
     ProcedureReturn
   EndIf
-
- ; ShowWindow_(hWnd, #SW_RESTORE)
+  
+  ; ShowWindow_(hWnd, #SW_RESTORE)
   ;FlashWindow_(hWnd, #True)
   
   Protected foregroundThread = GetWindowThreadProcessId_(foregroundHwnd, #Null)
   Protected currentThread    = GetCurrentThreadId_()
   
   If AttachThreadInput_(currentThread, foregroundThread, #True)
-   ; BringWindowToTop_(hWnd)
+    ; BringWindowToTop_(hWnd)
     SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
     ;SetForegroundWindow_(hWnd)
     ;SetWindowPos_(hWnd, #HWND_NOTOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
-
-   ; SetForegroundWindow_(hWnd)
+    
+    ; SetForegroundWindow_(hWnd)
     
     AttachThreadInput_(currentThread, foregroundThread, #False)
   Else
@@ -128,7 +128,7 @@ Procedure BringWindowToFrontHandle(hWnd)
 EndProcedure
 Procedure BringWindowToFront(window)
   Protected hWnd = WindowID(window)
-   BringWindowToFrontHandle(hWnd)
+  BringWindowToFrontHandle(hWnd)
 EndProcedure 
 ;=====================================================================
 ;  SINGLE INSTANCE CHECK – Exit if already running, bring other to front
@@ -198,30 +198,30 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
 CompilerEndIf
 
 
-  Procedure SetWindowThemeDynamic(hwnd.i, subAppName.s)
-    Protected hUxTheme = OpenLibrary(#PB_Any, "uxtheme.dll")
-    If hUxTheme
-      Protected *fn = GetFunction(hUxTheme, "SetWindowTheme")
-      If *fn
-        CallFunctionFast(*fn, hwnd, @subAppName, 0)
-      EndIf
-      CloseLibrary(hUxTheme)
+Procedure SetWindowThemeDynamic(hwnd.i, subAppName.s)
+  Protected hUxTheme = OpenLibrary(#PB_Any, "uxtheme.dll")
+  If hUxTheme
+    Protected *fn = GetFunction(hUxTheme, "SetWindowTheme")
+    If *fn
+      CallFunctionFast(*fn, hwnd, @subAppName, 0)
     EndIf
-  EndProcedure
+    CloseLibrary(hUxTheme)
+  EndIf
+EndProcedure
 
-  Procedure ApplyGadgetTheme(gadgetId)
-    
-    ; Only apply if dark mode active
-    If IsDarkModeActiveCached
-      SetWindowThemeDynamic(gadgetId, "DarkMode_Explorer")
-    Else
-      SetWindowThemeDynamic(gadgetId, "Explorer")
-    EndIf
-    
-    ; Force repaint
-    SendMessage_(gadgetId, #WM_THEMECHANGED, 0, 0)
-    InvalidateRect_(gadgetId, #Null, #True)
-  EndProcedure
+Procedure ApplyGadgetTheme(gadgetId)
+  
+  ; Only apply if dark mode active
+  If IsDarkModeActiveCached
+    SetWindowThemeDynamic(gadgetId, "DarkMode_Explorer")
+  Else
+    SetWindowThemeDynamic(gadgetId, "Explorer")
+  EndIf
+  
+  ; Force repaint
+  SendMessage_(gadgetId, #WM_THEMECHANGED, 0, 0)
+  InvalidateRect_(gadgetId, #Null, #True)
+EndProcedure
 
 
 CompilerIf #PB_Compiler_OS = #PB_OS_Windows
@@ -229,18 +229,18 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   
   
   
-   Procedure ApplyThemeToWindowChildren(hWnd, lParam)
+  Procedure ApplyThemeToWindowChildren(hWnd, lParam)
     Protected className.s = Space(256)
-
-
+    
+    
     ;ApplyGadgetTheme(hWnd)
     Protected length = GetClassName_(hWnd, @className, 256)
-
+    
     If length > 0
       className = LCase(PeekS(@className))
       
     EndIf
-
+    
     InvalidateRect_(hWnd, #Null, #True)
     ProcedureReturn #True
   EndProcedure
@@ -261,11 +261,11 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
       bg = RGB(255, 255, 255)
       fg = RGB(0, 0, 0)
     EndIf 
-
+    
     SetWindowColor(0, bg)
     SetDarkTitleBar(hWnd, IsDarkModeActiveCached)
     EnumChildWindows_(hWnd, @ApplyThemeToWindowChildren(), 0)
-
+    
   EndProcedure
 CompilerElse
   Procedure ApplyThemeToWindowHandle(hWnd) : EndProcedure
@@ -276,14 +276,14 @@ CompilerEndIf
 Procedure SetWebViewStyle()
   Protected bgHex.s, fgHex.s
   
- 
+  
   If IsDarkModeActiveCached
     bgHex = "#0a0a0a"   ; black background
   Else
     bgHex = "#FFFFFF"   ; white background
   EndIf
   
-
+  
   If IsGadget(0)
     Protected js.s
     
@@ -313,41 +313,41 @@ EndProcedure
 Procedure SetWebViewStyleZoom(active)
   Protected bgHex.s, fgHex.s
   ProcedureReturn
-
+  
   If IsDarkModeActiveCached
     bgHex = "#0a0a0a"   ; black background
   Else
     bgHex = "#FFFFFF"   ; white background
   EndIf
   
-
+  
   If IsGadget(0)
     
     If active
-    Protected js.s
-    
-
-    
-    js = ~"(() => {\n" +
-         ~"  var el = document.getElementById('force-resize-hidden-style');\n" +
-         ~"  if (el) el.remove();\n" +
-         ~"  const style = document.createElement('style');\n" +
-         ~"  style.id = 'force-resize-hidden-style';\n" +
-         ~"  style.textContent = `\n" +
-         ~"    body {\n" +
-         ~"    }\n" +
-         ~"  `;\n" +
-         ~"  document.head.appendChild(style);\n" +
-         ~"})();"
-    
-    
-
-    Debug js
-  Else
-        js = ~"(() => {\n" +
-         ~"  var el = document.getElementById('force-resize-hidden-style');\n" +
-         ~"  if (el) el.remove();\n" +
-         ~"})();"
+      Protected js.s
+      
+      
+      
+      js = ~"(() => {\n" +
+           ~"  var el = document.getElementById('force-resize-hidden-style');\n" +
+           ~"  if (el) el.remove();\n" +
+           ~"  const style = document.createElement('style');\n" +
+           ~"  style.id = 'force-resize-hidden-style';\n" +
+           ~"  style.textContent = `\n" +
+           ~"    body {\n" +
+           ~"    }\n" +
+           ~"  `;\n" +
+           ~"  document.head.appendChild(style);\n" +
+           ~"})();"
+      
+      
+      
+      Debug js
+    Else
+      js = ~"(() => {\n" +
+           ~"  var el = document.getElementById('force-resize-hidden-style');\n" +
+           ~"  if (el) el.remove();\n" +
+           ~"})();"
     EndIf 
     
     WebViewExecuteScript(0, js)
@@ -709,11 +709,14 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   Global Shift_Down = #False
   
   ProcedureDLL.i KeyboardProc(nCode, wParam, lParam)
+    
     Static CombinationToggle_Count   = 0
     Static CombinationToggle_LastTime = 0
     Static CombinationNew_Count   = 0
-     Static CombinationNew__LastTime = 0
-     
+    Static CombinationNew__LastTime = 0
+    
+    
+    Protected foregroundHwnd = GetForegroundWindow_()
     If nCode < 0
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
@@ -722,7 +725,6 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected flags = PeekL(lParam + 8)
     Protected isDown = Bool(Not (flags & $80000000))
     Protected now = 0
-    Protected foregroundHwnd = 0
     If vKey = #VK_LSHIFT Or vKey = #VK_RSHIFT
       Shift_Down = 1-Shift_Down
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
@@ -731,16 +733,15 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     If vKey = #VK_LCONTROL Or vKey = #VK_LWIN
       If isDown
         If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_LWIN) & $8000
-           now = ElapsedMilliseconds()
+          now = ElapsedMilliseconds()
           If CombinationToggle_LastTime = 0 Or now - CombinationToggle_LastTime < #DOUBLE_TAP_DELAY
             CombinationToggle_Count + 1
             If CombinationToggle_Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
-               foregroundHwnd = GetForegroundWindow_()
               If WindowID(0) = foregroundHwnd
                 HideMainWindow()
-                Else 
-              ShowMainWindow()
-              FocusInput()
+              Else 
+                ShowMainWindow()
+                FocusInput()
               EndIf 
               CombinationToggle_Count = 0
               CombinationToggle_LastTime = 0
@@ -764,11 +765,14 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     If vKey = #VK_LCONTROL Or vKey = #VK_N
       If isDown
         If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_N) & $8000
-           now = ElapsedMilliseconds()
+          now = ElapsedMilliseconds()
           If CombinationNew__LastTime = 0 Or now - CombinationNew__LastTime < #DOUBLE_TAP_DELAY
             CombinationNew__Count + 1
             If CombinationNew__Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
-              WebViewExecuteScript(0, ~"document.querySelector('button[aria-label="+Chr(34)+"New Chat"+Chr(34)+"]').click();")
+              
+              If WindowID(0) = foregroundHwnd
+                WebViewExecuteScript(0, ~"document.querySelector('button[aria-label="+Chr(34)+"New Chat"+Chr(34)+"]').click();")
+              EndIf 
               CombinationNew__Count = 0
               CombinationNew__LastTime = 0
             Else
@@ -794,10 +798,13 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     
     If #False And vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
       Debug "#VK_RETURN"
-      Debug "-> send enter"
-      WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
-      keybd_event_(#VK_BACK, 0, 0, 0)
-      keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0)
+      
+      If WindowID(0) = foregroundHwnd
+        Debug "-> send enter"
+        WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
+        keybd_event_(#VK_BACK, 0, 0, 0)
+        keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0) 
+      EndIf
     EndIf
     
     ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
@@ -831,11 +838,11 @@ Procedure ResizeAppWindow()
     If Not (IsWindow(0) And IsGadget(0))
       ProcedureReturn
     EndIf
-   
-            ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))  
-
     
-
+    ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))  
+    
+    
+    
     oldW = WindowWidth(0)
     oldH = WindowHeight(0)
   CompilerEndIf
@@ -851,10 +858,10 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
   Else
     bg = RGB(255, 255, 255)
   EndIf   
-
+  
   Select msg
-     
-   Case #WM_ERASEBKGND
+      
+    Case #WM_ERASEBKGND
       Protected hdc = wParam
       Protected rect.RECT
       GetClientRect_(hwnd, @rect)
@@ -864,7 +871,7 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
       ProcedureReturn #True ; handled
     Case #WM_SETTINGCHANGE
       If lParam
-         themeName.s = PeekS(lParam)
+        themeName.s = PeekS(lParam)
         If themeName = "ImmersiveColorSet"
           IsDarkModeActive()
           ApplyThemeToWindowHandle(hwnd)
@@ -877,7 +884,7 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
       If (wParam & $FFFF) <> #WA_INACTIVE
         FocusInput()
       EndIf
-
+      
   EndSelect
   
   ProcedureReturn #PB_ProcessPureBasicEvents
@@ -958,10 +965,10 @@ Procedure OpenMainWindow()
   
   SetWindowCallback(@WindowCallback())
   BindEvent(#PB_Event_SizeWindow, @ResizeAppWindow(), 0)
-
+  
   Protected hWnd = WindowID(0)
   
-
+  
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     InstallKeyboardHook()
@@ -974,20 +981,20 @@ Procedure OpenMainWindow()
   CompilerEndIf
   
   WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
-
+  
   WebViewGadget(0, -10, -10, WindowWidth(0)+20, WindowHeight(0)+20,#PB_WebView_Debug)
   
-
-
+  
+  
   SetGadgetText(0, url)
   
- 
+  
   
   
   SetWebViewStyle()
   
   WebViewExecuteScript(0, ~"document.addEventListener('DOMContentLoaded', () => {callbackReadyState()});")
-   BindWebViewCallback(0, "callbackReadyState", @CallbackReadyState())
+  BindWebViewCallback(0, "callbackReadyState", @CallbackReadyState())
   ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
   
   HideGadget(0, #True)
@@ -1003,7 +1010,7 @@ EndProcedure
 Procedure HideMainWindow()
   If Not IsWindow(0) : ProcedureReturn : EndIf
   SaveCurrentGeometry()
- ; HideWindow(0, #True)
+  ; HideWindow(0, #True)
   ShowWindow_(WindowID(0), #SW_HIDE)
 EndProcedure
 
@@ -1016,7 +1023,7 @@ Procedure ShowMainWindow()
     StickyWindow(0,#True)
     SetActiveWindow(0)
   EndIf
-
+  
 EndProcedure
 
 ;=====================================================================
@@ -1036,37 +1043,37 @@ executeScript = ElapsedMilliseconds()
 
 
 Procedure CallbackLocation(JsonParameters$)
-   Dim Parameters.s(0)
-    ParseJSON(0, JsonParameters$)
-    ExtractJSONArray(JSONValue(0), Parameters())
-    location.s = Parameters(0)
-    If FindString(location,"login",1,  #PB_String_NoCase)
-        WindowBounds(0, 660, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
-        WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
-    EndIf 
-    ProcedureReturn UTF8(~"")
+  Dim Parameters.s(0)
+  ParseJSON(0, JsonParameters$)
+  ExtractJSONArray(JSONValue(0), Parameters())
+  location.s = Parameters(0)
+  If FindString(location,"login",1,  #PB_String_NoCase)
+    WindowBounds(0, 660, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
+    WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
+  EndIf 
+  ProcedureReturn UTF8(~"")
 EndProcedure 
 
 
 Repeat
   If Not webviewVisible And ElapsedMilliseconds() - start > 1500
     webviewVisible = #True
-        HideGadget(0, #False)
-
+    HideGadget(0, #False)
+    
   EndIf 
   
   If start <> 0 And ElapsedMilliseconds() - start > 3000
     HideGadget(0, #False)
   EndIf 
   
-    
+  
   If ElapsedMilliseconds() - executeScript > 300
     SetWebViewStyle()
     executeScript = ElapsedMilliseconds()
     BindWebViewCallback(0, "callbackLocation", @CallbackLocation())
     WebViewExecuteScript(0, ~"callbackLocation(document.location.href);")
-
-      EndIf 
+    
+  EndIf 
   
   windowEvent = WindowEvent()
   CompilerSelect #PB_Compiler_OS
@@ -1127,8 +1134,8 @@ DataSection
   Data.b $92, $EB, $47, $EE, $42, $FA, $99, $A9
 EndDataSection
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 794
-; FirstLine = 785
+; CursorPosition = 798
+; FirstLine = 766
 ; Folding = -----------
 ; Optimizer
 ; EnableThread
