@@ -24,31 +24,101 @@ EndIf
 
 
 ;=====================================================================
+;-  Window Fade-In & Resize
+;=====================================================================
+Procedure ShowWindowFadeInHandle(hWnd)
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    ShowWindow_(hWnd, #SW_SHOWNA)
+    UpdateWindow_(hWnd)
+    RedrawWindow_(hWnd, #Null, #Null, #RDW_UPDATENOW | #RDW_ALLCHILDREN | #RDW_FRAME)
+    
+    Protected msg.MSG
+    While PeekMessage_(@msg, hWnd, #WM_PAINT, #WM_PAINT, #PM_REMOVE)
+      DispatchMessage_(@msg)
+    Wend
+    
+    Protected hUser32 = OpenLibrary(#PB_Any, "user32.dll")
+    If hUser32
+      Protected *AnimateWindow = GetFunction(hUser32, "AnimateWindow")
+      If *AnimateWindow
+        CallFunctionFast(*AnimateWindow, hWnd, 300, $80000 | $20000)
+      EndIf
+      CloseLibrary(hUser32)
+    EndIf
+  CompilerElse
+    HideWindow(winID, #False)
+  CompilerEndIf
+EndProcedure
+
+Procedure ShowWindowFadeIn(winID)
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    Protected hWnd = WindowID(winID)
+    ShowWindowFadeInHandle(hWnd)
+  CompilerElse
+    HideWindow(winID, #False)
+  CompilerEndIf
+EndProcedure
+
+;=====================================================================
 ;-  Window Management Helpers
 ;=====================================================================
 
+Procedure BringWindowToFrontHandlXe(hWnd)
+  Protected fgThread, targetThread
+
+  If IsWindow_(hWnd) = 0
+    ProcedureReturn
+  EndIf
+
+  targetThread = GetWindowThreadProcessId_(hWnd, 0)
+  fgThread = GetWindowThreadProcessId_(GetForegroundWindow_(), 0)
+
+  ; Temporarily attach input so we can set foreground properly
+  If targetThread <> fgThread
+    AttachThreadInput_(fgThread, targetThread, #True)
+  EndIf
+
+  ; Show window if hidden (avoids transition)
+  ;ShowWindow_(hWnd, #SW_SHOW)
+
+  ; Bring to front and activate
+
+SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
+
+;SetForegroundWindow_(hWnd)
+  ;SetFocus_(hWnd)
+ ; BringWindowToTop_(hWnd)
+
+  If targetThread <> fgThread
+    AttachThreadInput_(fgThread, targetThread, #False)
+  EndIf
+EndProcedure
+
+
+
+
 Procedure BringWindowToFrontHandle(hWnd)
   Protected foregroundHwnd = GetForegroundWindow_()
+  
   
   If hWnd = foregroundHwnd
     ShowWindow_(hWnd, #SW_RESTORE)
     ProcedureReturn
   EndIf
-  
-  ShowWindow_(hWnd, #SW_RESTORE)
+
+ ; ShowWindow_(hWnd, #SW_RESTORE)
   ;FlashWindow_(hWnd, #True)
   
   Protected foregroundThread = GetWindowThreadProcessId_(foregroundHwnd, #Null)
   Protected currentThread    = GetCurrentThreadId_()
   
   If AttachThreadInput_(currentThread, foregroundThread, #True)
-
-    SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
+   ; BringWindowToTop_(hWnd)
+    SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
+    ;SetForegroundWindow_(hWnd)
     ;SetWindowPos_(hWnd, #HWND_NOTOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
-    SetActiveWindow_(hWnd)
-    SetForegroundWindow_(hWnd)
 
-
+   ; SetForegroundWindow_(hWnd)
     
     AttachThreadInput_(currentThread, foregroundThread, #False)
   Else
@@ -58,7 +128,7 @@ Procedure BringWindowToFrontHandle(hWnd)
 EndProcedure
 Procedure BringWindowToFront(window)
   Protected hWnd = WindowID(window)
-  BringWindowToFrontHandle(hWnd)
+   BringWindowToFrontHandle(hWnd)
 EndProcedure 
 ;=====================================================================
 ;  SINGLE INSTANCE CHECK – Exit if already running, bring other to front
@@ -616,6 +686,7 @@ CompilerEndIf
 ;=====================================================================
 
 Declare ShowMainWindow()
+Declare HideMainWindow()
 
 Procedure FocusInput()
   If IsGadget(0)
@@ -638,10 +709,11 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   Global Shift_Down = #False
   
   ProcedureDLL.i KeyboardProc(nCode, wParam, lParam)
-    Static CtrlAlt_Pressed = #False
-    Static CtrlAlt_Count   = 0
-    Static CtrlAlt_LastTime = 0
-    
+    Static CombinationToggle_Count   = 0
+    Static CombinationToggle_LastTime = 0
+    Static CombinationNew_Count   = 0
+     Static CombinationNew__LastTime = 0
+     
     If nCode < 0
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
@@ -649,41 +721,80 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected vKey  = PeekL(lParam) & $FF
     Protected flags = PeekL(lParam + 8)
     Protected isDown = Bool(Not (flags & $80000000))
-    
+    Protected now = 0
+    Protected foregroundHwnd = 0
     If vKey = #VK_LSHIFT Or vKey = #VK_RSHIFT
-      Shift_Down = isDown
+      Shift_Down = 1-Shift_Down
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
     If vKey = #VK_LCONTROL Or vKey = #VK_LWIN
       If isDown
         If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_LWIN) & $8000
-          Protected now = ElapsedMilliseconds()
-          If CtrlAlt_LastTime = 0 Or now - CtrlAlt_LastTime < #DOUBLE_TAP_DELAY
-            CtrlAlt_Count + 1
-            If CtrlAlt_Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
+           now = ElapsedMilliseconds()
+          If CombinationToggle_LastTime = 0 Or now - CombinationToggle_LastTime < #DOUBLE_TAP_DELAY
+            CombinationToggle_Count + 1
+            If CombinationToggle_Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
+               foregroundHwnd = GetForegroundWindow_()
+              If WindowID(0) = foregroundHwnd
+                HideMainWindow()
+                Else 
               ShowMainWindow()
               FocusInput()
-              CtrlAlt_Count = 0
-              CtrlAlt_LastTime = 0
+              EndIf 
+              CombinationToggle_Count = 0
+              CombinationToggle_LastTime = 0
             Else
-              CtrlAlt_LastTime = now
+              CombinationToggle_LastTime = now
             EndIf
           Else
-            CtrlAlt_Count = 1
-            CtrlAlt_LastTime = now
+            CombinationToggle_Count = 1
+            CombinationToggle_LastTime = now
           EndIf
         EndIf
       Else
         If Not (GetAsyncKeyState_(#VK_CONTROL) & $8000) Or Not (GetAsyncKeyState_(#VK_MENU) & $8000)
-          CtrlAlt_Pressed = #False
+          CombinationToggle_Count = 0
         EndIf
       EndIf
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
-    If vKey = #VK_RETURN And isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
-      
+    
+    If vKey = #VK_LCONTROL Or vKey = #VK_N
+      If isDown
+        If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_N) & $8000
+           now = ElapsedMilliseconds()
+          If CombinationNew__LastTime = 0 Or now - CombinationNew__LastTime < #DOUBLE_TAP_DELAY
+            CombinationNew__Count + 1
+            If CombinationNew__Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
+              WebViewExecuteScript(0, ~"document.querySelector('button[aria-label="+Chr(34)+"New Chat"+Chr(34)+"]').click();")
+              CombinationNew__Count = 0
+              CombinationNew__LastTime = 0
+            Else
+              CombinationNew__LastTime = now
+            EndIf
+          Else
+            CombinationNew__Count = 1
+            CombinationNew__LastTime = now
+          EndIf
+        EndIf
+      Else
+        If Not (GetAsyncKeyState_(#VK_CONTROL) & $8000) Or Not (GetAsyncKeyState_(#VK_MENU) & $8000)
+          CombinationNew__Count = 0
+        EndIf
+      EndIf
+      ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
+    EndIf
+    
+    
+    
+    
+    
+    
+    If vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
+      Debug "#VK_RETURN"
+      Debug "-> send enter"
       WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
       keybd_event_(#VK_BACK, 0, 0, 0)
       keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0)
@@ -707,33 +818,9 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
 CompilerEndIf
 
 ;=====================================================================
-;-  Window Fade-In & Resize
+;-  Window Resize
 ;=====================================================================
 
-Procedure ShowWindowFadeIn(winID)
-  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    Protected hWnd = WindowID(winID)
-    ShowWindow_(hWnd, #SW_SHOWNA)
-    UpdateWindow_(hWnd)
-    RedrawWindow_(hWnd, #Null, #Null, #RDW_UPDATENOW | #RDW_ALLCHILDREN | #RDW_FRAME)
-    
-    Protected msg.MSG
-    While PeekMessage_(@msg, hWnd, #WM_PAINT, #WM_PAINT, #PM_REMOVE)
-      DispatchMessage_(@msg)
-    Wend
-    
-    Protected hUser32 = OpenLibrary(#PB_Any, "user32.dll")
-    If hUser32
-      Protected *AnimateWindow = GetFunction(hUser32, "AnimateWindow")
-      If *AnimateWindow
-        CallFunctionFast(*AnimateWindow, hWnd, 300, $80000 | $20000)
-      EndIf
-      CloseLibrary(hUser32)
-    EndIf
-  CompilerElse
-    HideWindow(winID, #False)
-  CompilerEndIf
-EndProcedure
 
 
 
@@ -910,18 +997,20 @@ Procedure OpenMainWindow()
   
   Repeat : Delay(1) : Until WindowEvent() = 0
   ShowWindowFadeIn(0)
+  SetActiveWindow_(WindowID(0))
 EndProcedure
 
 Procedure HideMainWindow()
   If Not IsWindow(0) : ProcedureReturn : EndIf
   SaveCurrentGeometry()
-  SetWindowPos_(WindowID(0), #HWND_NOTOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
-  HideWindow(0, #True)
+ ; HideWindow(0, #True)
+  ShowWindow_(WindowID(0), #SW_HIDE)
 EndProcedure
 
 Procedure ShowMainWindow()
   If  IsWindow(0)
-    HideWindow(0, #False)
+    ;HideWindow(0, #False)
+    ShowWindow_(WindowID(0), #SW_SHOWNOACTIVATE) ; NOACTIVE AVOID FLICKER
     SetWindowState(0, #PB_Window_Normal)
     BringWindowToFront(0)
     StickyWindow(0,#True)
@@ -1038,13 +1127,13 @@ DataSection
   Data.b $92, $EB, $47, $EE, $42, $FA, $99, $A9
 EndDataSection
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 685
-; FirstLine = 666
-; Folding = ----------
+; CursorPosition = 770
+; FirstLine = 746
+; Folding = -----------
 ; Optimizer
 ; EnableThread
 ; EnableXP
 ; DPIAware
 ; UseIcon = icon\icon.ico
-; Executable = Assistant.exe
+; Executable = ..\Assistant.exe
 ; Compiler = PureBasic 6.21 - C Backend (Windows - x64)
