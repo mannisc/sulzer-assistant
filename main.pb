@@ -1,4 +1,63 @@
-﻿;=====================================================================
+﻿
+
+Procedure ErrorHandler()
+ 
+  ErrorMessage$ = "A program error was detected:" + Chr(13)
+  ErrorMessage$ + Chr(13)
+  ErrorMessage$ + "Error Message:   " + ErrorMessage()      + Chr(13)
+  ErrorMessage$ + "Error Code:      " + Str(ErrorCode())    + Chr(13)
+  ErrorMessage$ + "Code Address:    " + Str(ErrorAddress()) + Chr(13)
+ 
+  If ErrorCode() = #PB_OnError_InvalidMemory
+    ErrorMessage$ + "Target Address:  " + Str(ErrorTargetAddress()) + Chr(13)
+  EndIf
+ 
+  If ErrorLine() = -1
+    ErrorMessage$ + "Sourcecode line: Enable OnError lines support to get code line information." + Chr(13)
+  Else
+    ErrorMessage$ + "Sourcecode line: " + Str(ErrorLine()) + Chr(13)
+    ErrorMessage$ + "Sourcecode file: " + ErrorFile() + Chr(13)
+  EndIf
+ 
+  ErrorMessage$ + Chr(13)
+  ErrorMessage$ + "Register content:" + Chr(13)
+ 
+  CompilerSelect #PB_Compiler_Processor
+    CompilerCase #PB_Processor_x86
+      ErrorMessage$ + "EAX = " + Str(ErrorRegister(#PB_OnError_EAX)) + Chr(13)
+      ErrorMessage$ + "EBX = " + Str(ErrorRegister(#PB_OnError_EBX)) + Chr(13)
+      ErrorMessage$ + "ECX = " + Str(ErrorRegister(#PB_OnError_ECX)) + Chr(13)
+      ErrorMessage$ + "EDX = " + Str(ErrorRegister(#PB_OnError_EDX)) + Chr(13)
+      ErrorMessage$ + "EBP = " + Str(ErrorRegister(#PB_OnError_EBP)) + Chr(13)
+      ErrorMessage$ + "ESI = " + Str(ErrorRegister(#PB_OnError_ESI)) + Chr(13)
+      ErrorMessage$ + "EDI = " + Str(ErrorRegister(#PB_OnError_EDI)) + Chr(13)
+      ErrorMessage$ + "ESP = " + Str(ErrorRegister(#PB_OnError_ESP)) + Chr(13)
+ 
+    CompilerCase #PB_Processor_x64
+      ErrorMessage$ + "RAX = " + Str(ErrorRegister(#PB_OnError_RAX)) + Chr(13)
+      ErrorMessage$ + "RBX = " + Str(ErrorRegister(#PB_OnError_RBX)) + Chr(13)
+      ErrorMessage$ + "RCX = " + Str(ErrorRegister(#PB_OnError_RCX)) + Chr(13)
+      ErrorMessage$ + "RDX = " + Str(ErrorRegister(#PB_OnError_RDX)) + Chr(13)
+      ErrorMessage$ + "RBP = " + Str(ErrorRegister(#PB_OnError_RBP)) + Chr(13)
+      ErrorMessage$ + "RSI = " + Str(ErrorRegister(#PB_OnError_RSI)) + Chr(13)
+      ErrorMessage$ + "RDI = " + Str(ErrorRegister(#PB_OnError_RDI)) + Chr(13)
+      ErrorMessage$ + "RSP = " + Str(ErrorRegister(#PB_OnError_RSP)) + Chr(13)
+      ErrorMessage$ + "Display of registers R8-R15 skipped."         + Chr(13)
+ 
+  CompilerEndSelect
+  Debug "ERROR:"
+  Debug ErrorMessage$
+ 
+EndProcedure
+ 
+; Setup the error handler.
+;
+OnErrorCall(@ErrorHandler())
+
+
+
+
+;=====================================================================
 ;-  WebView Browser – Multi-desktop aware, clean JSON I/O, resolution match
 ;  + System-tray icon (Open / Exit) – Windows-only API safe
 ;=====================================================================
@@ -158,9 +217,9 @@ CompilerEndIf
 ;=====================================================================
 ;-  Windows Dark Mode Support
 ;=====================================================================
+  Global IsDarkModeActiveCached = #False
 
 CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  Global IsDarkModeActiveCached = #False
   
   Procedure IsDarkModeActive()
     Protected key, result = 0, value.l, size = SizeOf(Long)
@@ -175,6 +234,7 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   EndProcedure
   
   IsDarkModeActive()
+  
   
   #DWMWA_USE_IMMERSIVE_DARK_MODE = 20
   
@@ -307,7 +367,47 @@ Procedure SetWebViewStyle()
     
     WebViewExecuteScript(0, js)
     
+    ;Disable autoscroll (auto), allow manual scrolling (smooth)
+js = ~"(() => {\n" +
+     ~"  window.scrollBy = function() {};\n" +
+     ~"  window.scroll = function() {};\n" +
+     ~"  Element.prototype.scrollIntoView = function() {};\n" +
+     ~"  const patchScroll = () => {\n" +
+     ~"    document.querySelectorAll('*').forEach(el => {\n" +
+     ~"      el.scrollIntoView = function() {};\n" +
+     ~"      if(!el.scrollToOrig){el.scrollToOrig = el.scrollTo};\n" +
+     ~"      el.scrollTo = function(...args) {\n" +
+     ~"        if(args[0] && args[0].behavior === 'smooth') {\n" +
+     ~"          el.scrollToOrig(...args);\n" +
+     ~"          document.querySelectorAll('div[contenteditable]').forEach(w => {\n" +
+     ~"            if (!w.closest('#chat-input')) return;\n" +
+     ~"            w.setAttribute('tabindex','-1');\n" +
+     ~"            w.focus();\n" +
+     ~"            const p = w.querySelector('.ProseMirror p:last-child');\n" +
+     ~"            if(!p) return;\n" +
+     ~"            const r = document.createRange(), s = window.getSelection();\n" +
+     ~"            r.selectNodeContents(p);\n" +
+     ~"            r.collapse(false);\n" +
+     ~"            s.removeAllRanges();\n" +
+     ~"            s.addRange(r);\n" +
+     ~"          });\n" +
+     ~"        }\n" +
+     ~"      };\n" +
+     ~"    });\n" +
+     ~"  };\n" +
+     ~"  patchScroll();\n" +
+     ~"  const observer = new MutationObserver(patchScroll);\n" +
+     ~"  observer.observe(document.body, {childList: true, subtree: true});\n" +
+     ~"})();"
+
+
+
+
     
+    
+Debug js
+
+     WebViewExecuteScript(0, js)
   EndIf
 EndProcedure
 Procedure SetWebViewStyleZoom(active)
@@ -563,7 +663,10 @@ EndProcedure
 
 Procedure SaveCurrentGeometry()
   If Not IsWindow(0) : ProcedureReturn : EndIf
-  
+  If  IsZoomed_(WindowID(0)) Or IsIconic_(WindowID(0))
+    ProcedureReturn
+  EndIf 
+
   Protected numDesks = ExamineDesktops()
   Protected saveGeom.WindowGeom
   
@@ -796,7 +899,7 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     
     
     
-    If #False And vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
+    If  vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
       Debug "#VK_RETURN"
       
       If WindowID(0) = foregroundHwnd
@@ -961,7 +1064,6 @@ Procedure OpenMainWindow()
              #PB_Window_SystemMenu | #PB_Window_MinimizeGadget |
              #PB_Window_MaximizeGadget | #PB_Window_SizeGadget | #PB_Window_Invisible)
   StickyWindow(0,#True)
-  SetWindowColor(0,RGB(255,255,255))
   
   SetWindowCallback(@WindowCallback())
   BindEvent(#PB_Event_SizeWindow, @ResizeAppWindow(), 0)
@@ -1009,6 +1111,7 @@ EndProcedure
 
 Procedure HideMainWindow()
   If Not IsWindow(0) : ProcedureReturn : EndIf
+  
   SaveCurrentGeometry()
   ; HideWindow(0, #True)
   ShowWindow_(WindowID(0), #SW_HIDE)
@@ -1067,7 +1170,7 @@ Repeat
   EndIf 
   
   
-  If ElapsedMilliseconds() - executeScript > 300
+  If ElapsedMilliseconds() - executeScript > 1500
     SetWebViewStyle()
     executeScript = ElapsedMilliseconds()
     BindWebViewCallback(0, "callbackLocation", @CallbackLocation())
@@ -1075,7 +1178,9 @@ Repeat
     
   EndIf 
   
-  windowEvent = WindowEvent()
+  windowEvent = WaitWindowEvent()
+  
+  
   CompilerSelect #PB_Compiler_OS
     CompilerCase #PB_OS_Windows
       Select windowEvent
@@ -1088,14 +1193,16 @@ Repeat
             Case MenuOpenID
               ShowMainWindow()
             Case MenuExitID
-              SaveCurrentGeometry()
+                SaveCurrentGeometry()
+              
               RemoveTrayIcon()
               End
           EndSelect
         Case #PB_Event_SizeWindow, #PB_Event_MoveWindow
           If IsWindow(0)
             ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
-            SaveCurrentGeometry()
+              SaveCurrentGeometry()
+               
           EndIf
           
         Case #PB_Event_CloseWindow
@@ -1126,21 +1233,15 @@ CompilerEndIf
 End
 
 
-; Define GUID for ICoreWebView2Controller2
-DataSection
-  IID_ICoreWebView2Controller2:
-  Data.l $C979903E
-  Data.w $D4CA, $4228
-  Data.b $92, $EB, $47, $EE, $42, $FA, $99, $A9
-EndDataSection
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 798
-; FirstLine = 766
+; CursorPosition = 401
+; FirstLine = 369
 ; Folding = -----------
 ; Optimizer
 ; EnableThread
 ; EnableXP
 ; DPIAware
+; EnableOnError
 ; UseIcon = icon\icon.ico
 ; Executable = ..\Assistant.exe
 ; Compiler = PureBasic 6.21 - C Backend (Windows - x64)
