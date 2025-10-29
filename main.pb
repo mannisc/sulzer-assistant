@@ -792,7 +792,7 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     
     
     
-    If vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
+    If #False And vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
       Debug "#VK_RETURN"
       Debug "-> send enter"
       WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
@@ -1127,8 +1127,8 @@ DataSection
   Data.b $92, $EB, $47, $EE, $42, $FA, $99, $A9
 EndDataSection
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 770
-; FirstLine = 746
+; CursorPosition = 794
+; FirstLine = 785
 ; Folding = -----------
 ; Optimizer
 ; EnableThread
