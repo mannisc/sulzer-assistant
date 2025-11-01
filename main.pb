@@ -19,6 +19,7 @@ Declare LoadCurrentWindowDimension()
 Declare SetStaticWebviewGadgetJSSnippets()
 Declare CreateTrayIcon()
 Declare BuildTrayMenu()
+Declare CreateSettingsWindow()
 
 Global url.s  = "https://chat.sulzer.de"
 ; Change url and name with app params
@@ -53,17 +54,70 @@ Global menuOpenID = 100
 Global menuSettingsID = 101
 Global menuExitID = 102
 
+Global NewMap StaticControlThemeProcs()
+Global themeBgBrush
+
 CreateDirectory(appTemp)
 
 OnErrorCall(@ErrorHandler()) ; comment out if not needed 
 
+#WINDOW_MAIN = 0
 #Min_Window_Width  = 300
 #Min_Window_Height = 350
+
+
+
+
+
+Enumeration
+  #WINDOW_SETTINGS = 100
+  #TEXT_SHORTCUT_LABEL
+  #STRING_SHORTCUT_DISPLAY
+  #BTN_CAPTURE
+  #BTN_OK
+  #BTN_CANCEL
+EndEnumeration
+
+; Virtual Key Codes
+#VK_LCONTROL = $A2
+#VK_RCONTROL = $A3
+#VK_LSHIFT = $A0
+#VK_RSHIFT = $A1
+#VK_LMENU = $A4    ; Left Alt
+#VK_RMENU = $A5    ; Right Alt
+#VK_LWIN = $5B
+#VK_RWIN = $5C
+
+; Capture settings
+#CAPTURE_WAIT_TIME = 800  ; Wait 800ms after last key press before finalizing
+#MAX_KEYS = 4             ; Maximum number of keys in combination
+
+; Global variables for shortcut configuration
+Global SettingsHook = 0
+Global IsCapturing = #False
+Global CapturedKeys.s = ""
+Global NewList CapturedVKs()
+Global LastKeyPressTime.q = 0
+Global CaptureTimerRunning = #False
+
+; Structure to store shortcut configuration
+Structure ShortcutConfig
+  Key1.i
+  Key2.i
+  Key3.i
+  Key4.i
+  DisplayText.s
+EndStructure
+
+Global CurrentShortcut.ShortcutConfig
+
+
 
 SetStaticWebviewGadgetJSSnippets()
 
 LoadCurrentWindowDimension()
 OpenMainWindow()
+CreateSettingsWindow()
 CreateTrayIcon()
 BuildTrayMenu()
 
@@ -146,34 +200,34 @@ Procedure.s SetWebviewStyleJS()
   Else
     bgHex = "#FFFFFF"   ; white background
   EndIf
-ProcedureReturn ~"(() => {\n" +
-                 ~"  var el = document.getElementById('pb-theme-style');\n" +
-                 ~"  if (el) el.remove();\n" +
-                 ~"  const style = document.createElement('style');\n" +
-                 ~"  style.id = 'pb-theme-style';\n" +
-                 ~"  style.textContent = `\n" +
-                 ~"    :root {\n" +
-                 ~"      --color-gray-900: rgb(10, 10, 10);\n" +
-                 ~"    }\n" +
-                 ~"    html, body {\n" +
-                 "      background: " + bgHex + " !important;\n" +
-                 "      background-color: " + bgHex + " !important;\n" +
-                 ~"    }\n" +
-                 ~"    .absolute.w-full.h-full.flex.z-50 {\n" +
-                 ~"      background: #fff !important;\n" +
-                 ~"      background-color: #fff !important;\n" +
-                 ~"    }\n" +
-                 ~"    /* Info text below input, reduce space */\n" +
-                 ~"    .mx-auto.max-w-2xl.font-primary.mt-2 {\n" +
-                 ~"      max-height: 25px !important;\n" +
-                 ~"      margin-top: 0 !important;\n" +
-                 ~"      margin-bottom: 70px !important;\n" +
-                 ~"    }\n" +
-                 ~"  `;\n" +
-                 ~"  document.head.appendChild(style);\n" +
-                 ~"})();"
-
-
+  ProcedureReturn ~"(() => {\n" +
+                  ~"  var el = document.getElementById('pb-theme-style');\n" +
+                  ~"  if (el) el.remove();\n" +
+                  ~"  const style = document.createElement('style');\n" +
+                  ~"  style.id = 'pb-theme-style';\n" +
+                  ~"  style.textContent = `\n" +
+                  ~"    :root {\n" +
+                  ~"      --color-gray-900: rgb(10, 10, 10);\n" +
+                  ~"    }\n" +
+                  ~"    html, body {\n" +
+                  "      background: " + bgHex + " !important;\n" +
+                  "      background-color: " + bgHex + " !important;\n" +
+                  ~"    }\n" +
+                  ~"    .absolute.w-full.h-full.flex.z-50 {\n" +
+                  ~"      background: #fff !important;\n" +
+                  ~"      background-color: #fff !important;\n" +
+                  ~"    }\n" +
+                  ~"    /* Info text below input, reduce space */\n" +
+                  ~"    .mx-auto.max-w-2xl.font-primary.mt-2 {\n" +
+                  ~"      max-height: 25px !important;\n" +
+                  ~"      margin-top: 0 !important;\n" +
+                  ~"      margin-bottom: 70px !important;\n" +
+                  ~"    }\n" +
+                  ~"  `;\n" +
+                  ~"  document.head.appendChild(style);\n" +
+                  ~"})();"
+  
+  
   
 EndProcedure
 
@@ -309,8 +363,8 @@ Procedure EnsureSingleInstance()
         hWnd = FindWindow_("pb_window_0", #Null)  ; PureBasic main window class
       EndIf 
       If hWnd
-         ShowWindow_(hWnd, #SW_RESTORE)
-         BringWindowToFrontWinHandle(hWnd)
+        ShowWindow_(hWnd, #SW_RESTORE)
+        BringWindowToFrontWinHandle(hWnd)
       EndIf
       End;Exit this instance
     EndIf
@@ -386,24 +440,140 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   EndProcedure
   
   
+  Procedure StaticControlThemeProc(hwnd, msg, wParam, lParam)
+    
+    Protected oldProc = StaticControlThemeProcs(Str(hwnd))
+    Protected fg, bg
+    
+    If isDarkModeActiveCached
+      bg = RGB(10,10,10)
+      fg = RGB(220, 220, 220)
+    Else
+      bg = RGB(255, 255, 255)
+      fg = RGB(0, 0, 0)
+    EndIf 
+    Protected result
+    Select msg
+      Case #WM_SETTEXT
+        ; Let Windows actually set the text first
+        result = CallWindowProc_(oldProc, hwnd, msg, wParam, lParam)
+        ; Now trigger repaint AFTER text changed
+        InvalidateRect_(hwnd, #Null, #True)
+        UpdateWindow_(hwnd) ; force immediate paint
+        ProcedureReturn result
+        
+      Case #WM_PAINT
+        Protected ps.PAINTSTRUCT
+        Protected hdc = BeginPaint_(hwnd, @ps)
+        Protected rect.RECT
+        GetClientRect_(hwnd, @rect)
+        
+        ; Draw background
+        Protected hBrush = CreateSolidBrush_(bg)
+        FillRect_(hdc, @rect, hBrush)
+        DeleteObject_(hBrush)
+        
+        ; Font + color
+        Protected hFont = SendMessage_(hwnd, #WM_GETFONT, 0, 0)
+        If hFont : SelectObject_(hdc, hFont) : EndIf
+        SetBkMode_(hdc, #TRANSPARENT)
+        SetTextColor_(hdc, fg)
+        
+        ; Get text
+        Protected textLen = GetWindowTextLength_(hwnd)
+        
+        If textLen > 0
+          Protected *text = AllocateMemory((textLen + 1) * SizeOf(Character))
+          GetWindowText_(hwnd, *text, textLen + 1)
+          
+          ; Alignment + ellipsis setup
+          Protected style = GetWindowLong_(hwnd, #GWL_STYLE)
+          Protected format = #DT_VCENTER | #DT_SINGLELINE | #DT_END_ELLIPSIS | #DT_NOPREFIX | #DT_WORD_ELLIPSIS | #DT_MODIFYSTRING | #DT_LEFT
+          
+          If style & #SS_CENTER
+            format | #DT_CENTER
+          ElseIf style & #SS_RIGHT
+            format | #DT_RIGHT
+          EndIf
+          
+          ; Draw clipped text with ellipsis
+          DrawText_(hdc, *text, -1, @rect, format)
+          
+          FreeMemory(*text)
+        EndIf
+        
+        EndPaint_(hwnd, @ps)
+        ProcedureReturn 0
+        
+        
+        
+      Case #WM_ERASEBKGND
+        ProcedureReturn 1
+    EndSelect
+    
+    ProcedureReturn CallWindowProc_(oldProc, hwnd, msg, wParam, lParam) ; sometimes stackoveflow, fix wip
+  EndProcedure
   
-  Procedure ApplyThemeToWindowChildren(hWnd, lParam)
+  Global themeBackgroundColor.l
+  Global themeForegroundColor.l
+  
+  ; Change the callback to use proper calling convention
+  ProcedureC ApplyThemeToWindowChildren(hWnd, lParam)  ; Added CDLL
     Protected className.s = Space(256)
     
-    
-    ;ApplyGadgetTheme(hWnd)
     Protected length = GetClassName_(hWnd, @className, 256)
+    Debug "ApplyThemeToWindowChildren"
     
     If length > 0
       className = LCase(PeekS(@className))
+      Debug className
+      
+      Select className
+          
+          
+        Case "button"; Applies to Button, CheckBox, Option gadgets
+          
+          style.l = GetWindowLong_(hWnd, #GWL_STYLE)
+          
+          If Not (((style & #BS_CHECKBOX) <> 0) Or ((style & #BS_AUTOCHECKBOX) <> 0)) ; Not Checkbox
+            
+            ApplyGadgetTheme(hWnd)
+          EndIf
+          ; Force repaint for checkboxes/options
+          ;SendMessage_(hWnd, #WM_THEMECHANGED, 0, 0)
+          InvalidateRect_(hWnd, #Null, #True)          
+        Case "static"
+          Protected textLength = GetWindowTextLength_(hWnd)
+          If textLength = 0
+            ProcedureReturn #True ; probably ImageGadget
+          EndIf
+          
+          ; 1. Get old WndProc
+          CompilerIf #PB_Compiler_Processor = #PB_Processor_x64
+            Protected oldProc = GetWindowLongPtr_(hWnd, #GWLP_WNDPROC)
+          CompilerElse
+            Protected oldProc = GetWindowLong_(hWnd, #GWL_WNDPROC)
+          CompilerEndIf
+          If Not FindMapElement(StaticControlThemeProcs(),Str(hWnd))
+            StaticControlThemeProcs(Str(hWnd)) = oldProc
+          EndIf 
+          CompilerIf #PB_Compiler_Processor = #PB_Processor_x64
+            SetWindowLongPtr_(hWnd, #GWLP_WNDPROC, @StaticControlThemeProc())
+          CompilerElse
+            SetWindowLong_(hWnd, #GWL_WNDPROC, @StaticControlThemeProc())
+          CompilerEndIf
+          
+      EndSelect
+      
       
     EndIf
     
     InvalidateRect_(hWnd, #Null, #True)
     ProcedureReturn #True
   EndProcedure
- 
+  
   Procedure ApplyThemeToWinHandle(hWnd)
+    Debug "ApplyThemeToWinHandle"
     Protected bg, fg
     If isDarkModeActiveCached
       bg = RGB(10,10,10)
@@ -414,7 +584,9 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     EndIf 
     SetWindowColor(0, bg)
     SetDarkTitleBar(hWnd, isDarkModeActiveCached)
-    EnumChildWindows_(hWnd, @ApplyThemeToWindowChildren(), 0)
+    Debug hWnd
+    Debug @ApplyThemeToWindowChildren()
+    Debug EnumChildWindows_(hWnd, @ApplyThemeToWindowChildren(), 0)
   EndProcedure
 CompilerEndIf
 
@@ -714,28 +886,27 @@ EndProcedure
 ;-  System Tray (Windows only)
 ;=====================================================================
 
- 
-  
-  Procedure CreateTrayIcon()
-    If IsWindow(0)
-      AddSysTrayIcon(trayIconID, WindowID(0), appIcon)
-      SysTrayIconToolTip(trayIconID, name)
-    EndIf
-  EndProcedure
-  
-  Procedure RemoveTrayIcon()
-    RemoveSysTrayIcon(trayIconID)
-  EndProcedure
-  
-  Procedure BuildTrayMenu()
-    CreatePopupMenu(0)
-    MenuItem(menuOpenID, "Open")
-    MenuBar()
-    MenuItem(menuSettingsID, "Settings")
-    MenuBar()
-    MenuItem(menuExitID, "Exit")
-    SysTrayIconMenu(trayIconID, MenuID(0))   
-  EndProcedure
+
+
+Procedure CreateTrayIcon()
+  If IsWindow(0)
+    AddSysTrayIcon(trayIconID, WindowID(0), appIcon)
+    SysTrayIconToolTip(trayIconID, name)
+  EndIf
+EndProcedure
+
+Procedure RemoveTrayIcon()
+  RemoveSysTrayIcon(trayIconID)
+EndProcedure
+
+Procedure BuildTrayMenu()
+  CreatePopupMenu(0)
+  MenuItem(menuOpenID, "Open")
+  MenuItem(menuSettingsID, "Settings")
+  MenuBar()
+  MenuItem(menuExitID, "Exit")
+  SysTrayIconMenu(trayIconID, MenuID(0))   
+EndProcedure
 
 
 ;=====================================================================
@@ -755,10 +926,7 @@ EndProcedure
 
 CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   #DOUBLE_TAP_DELAY = 400
-  #VK_CONTROL = $11
-  #VK_MENU    = $12
-  #VK_RETURN  = $0D
-  #VK_SHIFT   = $10
+  
   
   Global DoubleCtrl_LastTime.q = 0
   Global DoubleCtrl_Count = 0
@@ -767,120 +935,196 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   
   ProcedureDLL.i KeyboardProc(nCode, wParam, lParam)
     
-    Static CombinationToggle_Count   = 0
+    Static CombinationToggle_Count = 0
     Static CombinationToggle_LastTime = 0
-    Static CombinationNew_Count   = 0
-    Static CombinationNew__LastTime = 0
-    
+    Static CombinationNew_Count = 0
+    Static CombinationNew_LastTime = 0
     
     Protected foregroundHwnd = GetForegroundWindow_()
+    
+    ; CRITICAL: Don't process hotkeys when settings window is active!
+    If IsWindow(#WINDOW_SETTINGS) And Not IsIconic_(WindowID(#WINDOW_SETTINGS)) And IsWindowVisible_(WindowID(#WINDOW_SETTINGS))
+      ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
+    EndIf
+    
     If nCode < 0
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
-    Protected vKey  = PeekL(lParam) & $FF
+    Protected vKey = PeekL(lParam) & $FF
     Protected flags = PeekL(lParam + 8)
     Protected isDown = Bool(Not (flags & $80000000))
     Protected now = 0
+    
+    ; Track Shift state for Enter handling
     If vKey = #VK_LSHIFT Or vKey = #VK_RSHIFT
-      Shift_Down = 1-Shift_Down
+      Shift_Down = 1 - Shift_Down
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
-    If vKey = #VK_LCONTROL Or vKey = #VK_LWIN
-      If isDown
-        If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_LWIN) & $8000
-          now = ElapsedMilliseconds()
-          If CombinationToggle_LastTime = 0 Or now - CombinationToggle_LastTime < #DOUBLE_TAP_DELAY
-            CombinationToggle_Count + 1
-            If CombinationToggle_Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
-              If WindowID(0) = foregroundHwnd
-                HideMainWindow()
-              Else 
-                ShowMainWindow()
-                FocusInput()
-              EndIf 
-              CombinationToggle_Count = 0
-              CombinationToggle_LastTime = 0
-            Else
-              CombinationToggle_LastTime = now
+    ;=======================================================================
+    ; DYNAMIC TOGGLE SHORTCUT (from CurrentShortcut structure)
+    ;=======================================================================
+    
+    ; Check if current key is part of the configured shortcut
+    Protected isShortcutKey = #False
+    If vKey = CurrentShortcut\Key1 Or vKey = CurrentShortcut\Key2 Or 
+       vKey = CurrentShortcut\Key3 Or vKey = CurrentShortcut\Key4
+      isShortcutKey = #True
+    EndIf
+    
+    If isShortcutKey And isDown
+      ; Check if ALL configured shortcut keys are currently pressed
+      Protected allKeysPressed = #True
+      
+      ; Check Key1 (always required)
+      If CurrentShortcut\Key1
+        If Not (GetAsyncKeyState_(CurrentShortcut\Key1) & $8000)
+          allKeysPressed = #False
+        EndIf
+      EndIf
+      
+      ; Check Key2 (always required)
+      If CurrentShortcut\Key2
+        If Not (GetAsyncKeyState_(CurrentShortcut\Key2) & $8000)
+          allKeysPressed = #False
+        EndIf
+      EndIf
+      
+      ; Check Key3 (optional)
+      If CurrentShortcut\Key3
+        If Not (GetAsyncKeyState_(CurrentShortcut\Key3) & $8000)
+          allKeysPressed = #False
+        EndIf
+      EndIf
+      
+      ; Check Key4 (optional)
+      If CurrentShortcut\Key4
+        If Not (GetAsyncKeyState_(CurrentShortcut\Key4) & $8000)
+          allKeysPressed = #False
+        EndIf
+      EndIf
+      
+      ; If all keys are pressed, handle the toggle action
+      If allKeysPressed
+        now = ElapsedMilliseconds()
+        
+        If CombinationToggle_LastTime = 0 Or now - CombinationToggle_LastTime < #DOUBLE_TAP_DELAY
+          CombinationToggle_Count + 1
+          
+          If CombinationToggle_Count >= 1 ; Single press to toggle
+            If WindowID(0) = foregroundHwnd
+              HideMainWindow()
+            Else 
+              ShowMainWindow()
+              FocusInput()
             EndIf
+            
+            CombinationToggle_Count = 0
+            CombinationToggle_LastTime = 0
           Else
-            CombinationToggle_Count = 1
             CombinationToggle_LastTime = now
           EndIf
+        Else
+          CombinationToggle_Count = 1
+          CombinationToggle_LastTime = now
         EndIf
-      Else
-        If Not (GetAsyncKeyState_(#VK_CONTROL) & $8000) Or Not (GetAsyncKeyState_(#VK_MENU) & $8000)
+      EndIf
+    Else
+      ; If a non-shortcut key is pressed or shortcut key released, reset counter
+      If Not isDown
+        ; Check if any of the shortcut keys are still pressed
+        Protected anyShortcutKeyPressed = #False
+        
+        If CurrentShortcut\Key1 And (GetAsyncKeyState_(CurrentShortcut\Key1) & $8000)
+          anyShortcutKeyPressed = #True
+        EndIf
+        If CurrentShortcut\Key2 And (GetAsyncKeyState_(CurrentShortcut\Key2) & $8000)
+          anyShortcutKeyPressed = #True
+        EndIf
+        If CurrentShortcut\Key3 And (GetAsyncKeyState_(CurrentShortcut\Key3) & $8000)
+          anyShortcutKeyPressed = #True
+        EndIf
+        If CurrentShortcut\Key4 And (GetAsyncKeyState_(CurrentShortcut\Key4) & $8000)
+          anyShortcutKeyPressed = #True
+        EndIf
+        
+        If Not anyShortcutKeyPressed
           CombinationToggle_Count = 0
         EndIf
       EndIf
-      ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
+    ;=======================================================================
+    ; CTRL+N for New Chat
+    ;=======================================================================
     
     If vKey = #VK_LCONTROL Or vKey = #VK_N
       If isDown
         If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_N) & $8000
           now = ElapsedMilliseconds()
-          If CombinationNew__LastTime = 0 Or now - CombinationNew__LastTime < #DOUBLE_TAP_DELAY
-            CombinationNew__Count + 1
-            If CombinationNew__Count >= 1 ; SET HERE HOW OFTEN KEYS NEED TO BE PRESSED
-              
+          
+          If CombinationNew_LastTime = 0 Or now - CombinationNew_LastTime < #DOUBLE_TAP_DELAY
+            CombinationNew_Count + 1
+            
+            If CombinationNew_Count >= 1
               If WindowID(0) = foregroundHwnd
-                WebViewExecuteScript(0, ~"document.querySelector('button[aria-label="+Chr(34)+"New Chat"+Chr(34)+"]').click();")
+                WebViewExecuteScript(0, ~"document.querySelector('button[aria-label=\"New Chat\"]').click();")
               EndIf 
-              CombinationNew__Count = 0
-              CombinationNew__LastTime = 0
+              
+              CombinationNew_Count = 0
+              CombinationNew_LastTime = 0
             Else
-              CombinationNew__LastTime = now
+              CombinationNew_LastTime = now
             EndIf
           Else
-            CombinationNew__Count = 1
-            CombinationNew__LastTime = now
+            CombinationNew_Count = 1
+            CombinationNew_LastTime = now
           EndIf
         EndIf
       Else
-        If Not (GetAsyncKeyState_(#VK_CONTROL) & $8000) Or Not (GetAsyncKeyState_(#VK_MENU) & $8000)
-          CombinationNew__Count = 0
+        If Not (GetAsyncKeyState_(#VK_CONTROL) & $8000) Or Not (GetAsyncKeyState_(#VK_N) & $8000)
+          CombinationNew_Count = 0
         EndIf
       EndIf
+      
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
+    ;=======================================================================
+    ; ENTER to Send Message (without Shift)
+    ;=======================================================================
     
-    
-    
-    
-    
-    If  vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0)       
-      If WindowID(0) = foregroundHwnd
-        WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
-        keybd_event_(#VK_BACK, 0, 0, 0)
-        keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0) 
-      EndIf
+    If vKey = #VK_RETURN And Not Shift_Down And isDown And 
+       GetActiveWindow_() = WindowID(0) And foregroundHwnd = WindowID(0)
+      
+      WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
+      keybd_event_(#VK_BACK, 0, 0, 0)
+      keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0)
     EndIf
     
     ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
   EndProcedure
+  
+  
 CompilerEndIf
 
-  Procedure InstallKeyboardHook()
-    CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+Procedure InstallKeyboardHook()
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     If KeyboardHook = 0
       KeyboardHook = SetWindowsHookEx_(#WH_KEYBOARD_LL, @KeyboardProc(), GetModuleHandle_(0), 0)
     EndIf
-    CompilerEndIf
-  EndProcedure
-  
-  Procedure RemoveKeyboardHook()
-    CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+  CompilerEndIf
+EndProcedure
+
+Procedure RemoveKeyboardHook()
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     If KeyboardHook
       UnhookWindowsHookEx_(KeyboardHook)
       KeyboardHook = 0
     EndIf
-    CompilerEndIf
-  EndProcedure
+  CompilerEndIf
+EndProcedure
 
 
 ;=====================================================================
@@ -894,16 +1138,16 @@ Global oldW = -1
 Global oldH = -1
 Procedure ResizeAppWindow()
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    If Not (IsWindow(0) And IsGadget(0))
+    If Not (IsWindow(#WINDOW_MAIN) And IsGadget(0))
       ProcedureReturn
     EndIf
-    ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))  
+    ResizeGadget(0,0,0,WindowWidth(#WINDOW_MAIN), WindowHeight(#WINDOW_MAIN))  
   CompilerEndIf
 EndProcedure
 
 
 #DWMWA_BORDER_COLOR = 34 
-Global themeBgBrush
+
 Procedure WindowCallback(hwnd, msg, wParam, lParam)
   Protected bg.l
   If isDarkModeActiveCached
@@ -930,11 +1174,35 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
         EndIf
       EndIf
     Case #WM_SETFOCUS
-      FocusInput()
-    Case #WM_ACTIVATE
-      If (wParam & $FFFF) <> #WA_INACTIVE
+      If hwnd = WindowID(#WINDOW_MAIN)
         FocusInput()
+      EndIf 
+    Case #WM_ACTIVATE
+      If hwnd = WindowID(#WINDOW_MAIN)
+        If (wParam & $FFFF) <> #WA_INACTIVE
+          FocusInput() 
+        EndIf 
       EndIf
+    Case #WM_CTLCOLORSTATIC
+      SetTextColor_(wParam, fg)
+      SetBkMode_(wParam, #TRANSPARENT)
+      parentBrush = GetClassLongPtr_(hwnd, #GCL_HBRBACKGROUND)
+      If parentBrush
+        ProcedureReturn parentBrush
+      Else
+        ProcedureReturn GetStockObject_(#NULL_BRUSH)
+      EndIf
+    Case #WM_CTLCOLORBTN
+      SetTextColor_(wParam, fg)
+      SetBkMode_(wParam, #TRANSPARENT)
+      If themeBgBrush
+        DeleteObject_(themeBgBrush)
+      EndIf
+      themeBgBrush = CreateSolidBrush_( bg )
+      
+      ProcedureReturn themeBgBrush
+      
+      
   EndSelect
   ProcedureReturn #PB_ProcessPureBasicEvents
 EndProcedure
@@ -986,15 +1254,17 @@ Procedure CallbackReadyState(JsonParameters$)
 EndProcedure
 
 ;=====================================================================
-;-  Window Control Procedures
+;-  Main Window Control Procedures
 ;=====================================================================
 
 Procedure OpenMainWindow()
   
-  OpenWindow(0, windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, name,
+  OpenWindow(#WINDOW_MAIN, windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, name,
              #PB_Window_SystemMenu | #PB_Window_MinimizeGadget |
              #PB_Window_MaximizeGadget | #PB_Window_SizeGadget | #PB_Window_Invisible)
-  StickyWindow(0,#True)
+  SetWindowCallback(@WindowCallback())
+  
+  StickyWindow(#WINDOW_MAIN,#True)
   
   SetWindowCallback(@WindowCallback())
   BindEvent(#PB_Event_SizeWindow, @ResizeAppWindow(), 0)
@@ -1002,27 +1272,27 @@ Procedure OpenMainWindow()
   InstallKeyboardHook()
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    Protected hWnd = WindowID(0)
+    Protected hWnd = WindowID(#WINDOW_MAIN)
     ApplyThemeToWinHandle(hWnd)
     SetWindowPos_(hWnd, 0, windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, #SWP_NOZORDER | #SWP_NOACTIVATE)
     SendMessage_(hWnd, #WM_SETICON, #ICON_SMALL, appIcon)
     SendMessage_(hWnd, #WM_SETICON, #ICON_BIG, appIcon)
   CompilerEndIf
   
-  WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
+  WindowBounds(#WINDOW_MAIN, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
   
-  WebViewGadget(0, -10, -10, WindowWidth(0)+20, WindowHeight(0)+20,#PB_WebView_Debug)
+  WebViewGadget(0, -10, -10, WindowWidth(#WINDOW_MAIN)+20, WindowHeight(#WINDOW_MAIN)+20,#PB_WebView_Debug)
   SetGadgetText(0, url)
   InjectWebViewCustomJS()
   WebViewExecuteScript(0, ~"document.addEventListener('DOMContentLoaded', () => {callbackReadyState()});")
   BindWebViewCallback(0, "callbackReadyState", @CallbackReadyState())
   
-  ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
+  ResizeGadget(0,0,0,WindowWidth(#WINDOW_MAIN), WindowHeight(#WINDOW_MAIN))
   HideGadget(0, #True)
   
   Repeat : Delay(1) : Until WindowEvent() = 0
-  ShowWindowFadeIn(0)
-  SetActiveWindow_(WindowID(0))
+  ShowWindowFadeIn(#WINDOW_MAIN)
+  SetActiveWindow_(WindowID(#WINDOW_MAIN))
 EndProcedure
 
 Procedure HideMainWindow()
@@ -1063,14 +1333,296 @@ Procedure CallbackLocation(jsonParameters.s)
 EndProcedure 
 
 
+
+;=====================================================================
+;-  Settings Window Control Procedures
+;=====================================================================
+
+
+Procedure.s GetKeyName(vKey)
+  ; Convert virtual key code to display name
+  Select vKey
+    Case #VK_LCONTROL, #VK_RCONTROL
+      ProcedureReturn "Ctrl"
+    Case #VK_LSHIFT, #VK_RSHIFT
+      ProcedureReturn "Shift"
+    Case #VK_LMENU, #VK_RMENU
+      ProcedureReturn "Alt"
+    Case #VK_LWIN, #VK_RWIN
+      ProcedureReturn "Win"
+    Case $41 To $5A ; A-Z
+      ProcedureReturn Chr(vKey)
+    Case $30 To $39 ; 0-9
+      ProcedureReturn Chr(vKey)
+    Case $70 To $87 ; F1-F24
+      ProcedureReturn "F" + Str(vKey - $6F)
+    Case $20
+      ProcedureReturn "Space"
+    Case $09
+      ProcedureReturn "Tab"
+    Case $08
+      ProcedureReturn "Backspace"
+    Case $2E
+      ProcedureReturn "Delete"
+    Case $24
+      ProcedureReturn "Home"
+    Case $23
+      ProcedureReturn "End"
+    Case $21
+      ProcedureReturn "PageUp"
+    Case $22
+      ProcedureReturn "PageDown"
+    Case $25
+      ProcedureReturn "Left"
+    Case $26
+      ProcedureReturn "Up"
+    Case $27
+      ProcedureReturn "Right"
+    Case $28
+      ProcedureReturn "Down"
+    Default
+      ProcedureReturn "Key" + Str(vKey)
+  EndSelect
+EndProcedure
+
+Procedure.i IsModifierKey(vKey)
+  ; Check if the key is a modifier
+  Select vKey
+    Case #VK_LCONTROL, #VK_RCONTROL, #VK_LSHIFT, #VK_RSHIFT, 
+         #VK_LMENU, #VK_RMENU, #VK_LWIN, #VK_RWIN
+      ProcedureReturn #True
+    Default
+      ProcedureReturn #False
+  EndSelect
+EndProcedure
+
+Procedure UpdateCapturedKeysDisplay()
+  ; Build display string from captured keys
+  CapturedKeys = ""
+  Protected first = #True
+  
+  ; Sort modifiers first for consistent display
+  Protected NewList SortedKeys()
+  Protected NewList ModifierKeys()
+  Protected NewList RegularKeys()
+  
+  ForEach CapturedVKs()
+    If IsModifierKey(CapturedVKs())
+      AddElement(ModifierKeys())
+      ModifierKeys() = CapturedVKs()
+    Else
+      AddElement(RegularKeys())
+      RegularKeys() = CapturedVKs()
+    EndIf
+  Next
+  
+  ; Add modifiers first
+  ForEach ModifierKeys()
+    If Not first
+      CapturedKeys + "+"
+    EndIf
+    CapturedKeys + GetKeyName(ModifierKeys())
+    first = #False
+  Next
+  
+  ; Then regular keys
+  ForEach RegularKeys()
+    If Not first
+      CapturedKeys + "+"
+    EndIf
+    CapturedKeys + GetKeyName(RegularKeys())
+    first = #False
+  Next
+  
+  SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+EndProcedure
+
+Procedure FinalizeCapture()
+  ; Stop capturing
+  IsCapturing = #False
+  CaptureTimerRunning = #False
+  SetGadgetText(#BTN_CAPTURE, "Change")
+  
+  If SettingsHook
+    UnhookWindowsHookEx_(SettingsHook)
+    SettingsHook = 0
+  EndIf
+  
+  ; Validate the combination (at least 2 keys)
+  If ListSize(CapturedVKs()) < 2
+    CapturedKeys = "Invalid - need at least 2 keys"
+    ClearList(CapturedVKs())
+    SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+  EndIf
+  
+  ; Remove focus from the input field so it can be clicked again
+  SetActiveGadget(#BTN_OK)
+EndProcedure
+
+ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
+  If nCode < 0
+    ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
+  EndIf
+  
+  Protected vKey = PeekL(lParam) & $FF
+  Protected flags = PeekL(lParam + 8)
+  Protected isDown = Bool(Not (flags & $80000000))
+  
+  If IsCapturing
+    If isDown
+      ; Key pressed down
+      ; Check if we haven't exceeded max keys
+      If ListSize(CapturedVKs()) >= #MAX_KEYS
+        ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
+      EndIf
+      
+      ; Add to captured keys list if not already there
+      Protected found = #False
+      ForEach CapturedVKs()
+        If CapturedVKs() = vKey
+          found = #True
+          Break
+        EndIf
+      Next
+      
+      If Not found
+        AddElement(CapturedVKs())
+        CapturedVKs() = vKey
+      EndIf
+      
+      ; Update display
+      UpdateCapturedKeysDisplay()
+      
+      ; Reset the timer - we're waiting for more keys
+      LastKeyPressTime = ElapsedMilliseconds()
+      CaptureTimerRunning = #True
+      
+    EndIf
+  EndIf
+  
+  ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
+EndProcedure
+
+Procedure CheckCaptureTimeout()
+  ; Check if we should finalize the capture
+  If IsCapturing And CaptureTimerRunning
+    Protected now = ElapsedMilliseconds()
+    If now - LastKeyPressTime >= #CAPTURE_WAIT_TIME
+      ; Timeout reached - finalize capture
+      FinalizeCapture()
+    EndIf
+  EndIf
+EndProcedure
+
+Procedure StartCapture()
+  IsCapturing = #True
+  CapturedKeys = "Press keys..."
+  ClearList(CapturedVKs())
+  LastKeyPressTime = 0
+  CaptureTimerRunning = #False
+  
+  SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+  SetGadgetText(#BTN_CAPTURE, "Listening...")
+  
+  ; Install keyboard hook
+  If Not SettingsHook
+    SettingsHook = SetWindowsHookEx_(#WH_KEYBOARD_LL, @SettingsKeyboardProc(), 
+                                     GetModuleHandle_(0), 0)
+  EndIf
+EndProcedure
+
+Procedure StopCapture()
+  IsCapturing = #False
+  CaptureTimerRunning = #False
+  SetGadgetText(#BTN_CAPTURE, "Change")
+  
+  If SettingsHook
+    UnhookWindowsHookEx_(SettingsHook)
+    SettingsHook = 0
+  EndIf
+  
+  ; Remove focus from the input field so it can be clicked again
+  SetActiveGadget(#BTN_OK)
+EndProcedure
+
+Procedure SaveShortcut()
+  ; Save the captured keys to CurrentShortcut structure
+  CurrentShortcut\Key1 = 0
+  CurrentShortcut\Key2 = 0
+  CurrentShortcut\Key3 = 0
+  CurrentShortcut\Key4 = 0
+  
+  ; Store up to 4 keys
+  Protected count = 0
+  ForEach CapturedVKs()
+    count + 1
+    Select count
+      Case 1: CurrentShortcut\Key1 = CapturedVKs()
+      Case 2: CurrentShortcut\Key2 = CapturedVKs()
+      Case 3: CurrentShortcut\Key3 = CapturedVKs()
+      Case 4: CurrentShortcut\Key4 = CapturedVKs()
+    EndSelect
+  Next
+  
+  CurrentShortcut\DisplayText = CapturedKeys
+EndProcedure
+
+Procedure.i ValidateShortcut()
+  ; Check if we have a valid shortcut (at least 2 keys)
+  If ListSize(CapturedVKs()) >= 2
+    ProcedureReturn #True
+  EndIf
+  ProcedureReturn #False
+EndProcedure
+
+Procedure CreateSettingsWindow()
+  ; Initialize default shortcut (Ctrl+Win)
+  If CurrentShortcut\DisplayText = ""
+    CurrentShortcut\Key1 = #VK_LCONTROL
+    CurrentShortcut\Key2 = #VK_SPACE
+    CurrentShortcut\DisplayText = "Ctrl+Win"
+  EndIf
+  
+  If OpenWindow(#WINDOW_SETTINGS, 0, 0, 400, 135, "Settings", 
+                #PB_Window_SystemMenu | #PB_Window_ScreenCentered| #PB_Window_Invisible)
+    
+    StickyWindow(#WINDOW_SETTINGS,#True)
+    
+    
+    SendMessage_(hWnd, #WM_SETICON, #ICON_SMALL, appIcon)
+    SendMessage_(hWnd, #WM_SETICON, #ICON_BIG, appIcon)
+    ; Keyboard shortcut label
+    TextGadget(#TEXT_SHORTCUT_LABEL, 20, 16, 120, 25, "Keyboard shortcut:")
+    
+    ; Display current shortcut - Remove #PB_String_ReadOnly to allow clicking
+    StringGadget(#STRING_SHORTCUT_DISPLAY, 150, 17, 150, 25, 
+                 CurrentShortcut\DisplayText)
+    
+    ; Capture button
+    ButtonGadget(#BTN_CAPTURE, 310, 17, 70, 25, "Change")
+    
+    ; OK button
+    ButtonGadget(#BTN_OK, 210, 85, 80, 30, "OK")
+    
+    ; Cancel button
+    ButtonGadget(#BTN_CANCEL, 300, 85, 80, 30, "Cancel")
+    
+    ; Add timer to check for capture timeout
+    
+    
+    ApplyThemeToWinHandle(WindowID(#WINDOW_SETTINGS))
+    
+    
+  EndIf
+EndProcedure
+
+
 ;=====================================================================
 ;-  Main Loop
 ;=====================================================================
-
 Procedure MainLoop()
-
   
-  startTime= ElapsedMilliseconds()
+  startTime = ElapsedMilliseconds()
   executeScriptTime = ElapsedMilliseconds()
   
   Repeat
@@ -1080,41 +1632,167 @@ Procedure MainLoop()
       HideGadget(0, #False) 
     EndIf 
     
-    If ElapsedMilliseconds() - executeScriptTime > 2000
+    ; Don't inject JS or do webview operations when settings window is open!
+    Protected settingsVisible = #False
+    CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+      If IsWindow(#WINDOW_SETTINGS)
+        settingsVisible = Bool(IsWindowVisible_(WindowID(#WINDOW_SETTINGS)))
+      EndIf
+    CompilerEndIf
+    
+    If Not settingsVisible And ElapsedMilliseconds() - executeScriptTime > 2000
       executeScriptTime = ElapsedMilliseconds() 
       InjectWebViewCustomJS()
-      executeScript = ElapsedMilliseconds()
       BindWebViewCallback(0, "callbackLocation", @CallbackLocation())      
       WebViewExecuteScript(0, ~"callbackLocation(document.location.href);")
     EndIf 
     
-    windowEvent = WaitWindowEvent()
-    CompilerSelect #PB_Compiler_OS
-      CompilerCase #PB_OS_Windows
+    windowEvent = WaitWindowEvent(10) ; Add timeout so it doesn't block
+    currentWindow = EventWindow()
+    
+    Debug "Event: " + Str(windowEvent) + " Window: " + Str(currentWindow) + " Gadget: " + Str(EventGadget())
+    
+    Select currentWindow
+      Case #WINDOW_MAIN
         Select windowEvent
           Case #PB_Event_SysTray
             ShowMainWindow()
+            
           Case #PB_Event_Menu
             Select EventMenu()
               Case menuOpenID
                 ShowMainWindow()
+                
+              Case menuSettingsID
+                ; First hide main window
+                HideMainWindow()
+                
+                ; CRITICAL: Temporarily unhook keyboard to prevent focus stealing!
+                RemoveKeyboardHook()
+                
+                ; Stop any capturing
+                If IsCapturing
+                  StopCapture()
+                EndIf
+                
+                ; Reset display to current shortcut
+                If IsGadget(#STRING_SHORTCUT_DISPLAY)
+                  SetGadgetText(#STRING_SHORTCUT_DISPLAY, CurrentShortcut\DisplayText)
+                EndIf
+                
+                ; Show settings window
+                CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+                  Protected settingsHwnd = WindowID(#WINDOW_SETTINGS)
+                  
+                  ShowWindow_(settingsHwnd, #SW_RESTORE)
+                  UpdateWindow_(settingsHwnd)
+                  SetForegroundWindow_(settingsHwnd)
+                  BringWindowToTop_(settingsHwnd)
+                  SetFocus_(settingsHwnd)
+                CompilerElse
+                  HideWindow(#WINDOW_SETTINGS, #False)
+                CompilerEndIf
+                
+                ; Start timer AFTER showing
+                AddWindowTimer(#WINDOW_SETTINGS, 1, 50)
+                
               Case menuExitID
                 SaveCurrentWindowDimensions()
                 RemoveTrayIcon()
                 End
             EndSelect
+            
           Case #PB_Event_SizeWindow, #PB_Event_MoveWindow
-            If IsWindow(0)
-              ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
+            If IsWindow(#WINDOW_MAIN)
+              ResizeGadget(0, 0, 0, WindowWidth(#WINDOW_MAIN), WindowHeight(#WINDOW_MAIN))
               SaveCurrentWindowDimensions() 
             EndIf
+            
           Case #PB_Event_CloseWindow
             HideMainWindow()
-          ;Case #PB_Event_Gadget
         EndSelect
-    CompilerEndSelect
+        
+      Case #WINDOW_SETTINGS
+        Debug "==> SETTINGS EVENT TYPE: " + Str(windowEvent)
+        
+        Protected closedSettings = #False
+        
+        Select windowEvent
+          Case #PB_Event_Timer
+            Debug "Timer event"
+            If EventTimer() = 1
+              CheckCaptureTimeout()
+            EndIf
+            
+          Case #PB_Event_Gadget
+            Debug "==> GADGET EVENT: " + Str(EventGadget()) + " Type: " + Str(EventType())
+            
+            Select EventGadget()
+              Case #STRING_SHORTCUT_DISPLAY
+                Debug "String gadget clicked"
+                If EventType() = #PB_EventType_Focus
+                  If Not IsCapturing
+                    StartCapture()
+                  EndIf
+                EndIf
+                
+              Case #BTN_CAPTURE
+                Debug "Capture button clicked"
+                If Not IsCapturing
+                  StartCapture()
+                Else
+                  StopCapture()
+                  If CurrentShortcut\DisplayText <> ""
+                    SetGadgetText(#STRING_SHORTCUT_DISPLAY, CurrentShortcut\DisplayText)
+                  Else
+                    SetGadgetText(#STRING_SHORTCUT_DISPLAY, "")
+                  EndIf
+                EndIf
+                
+              Case #BTN_OK
+                Debug "OK button clicked"
+                StopCapture()
+                
+                If ListSize(CapturedVKs()) > 0
+                  If ValidateShortcut()
+                    SaveShortcut()
+                    Debug "Shortcut saved: " + CurrentShortcut\DisplayText
+                  Else
+                    MessageRequester("Error", "Please capture a valid shortcut (at least 2 keys) or click Cancel.", 
+                                     #PB_MessageRequester_Error)
+                    Break ; Don't close window
+                  EndIf
+                EndIf
+                
+                closedSettings = #True 
+                
+              Case #BTN_CANCEL
+                Debug "Cancel button clicked"
+                StopCapture()
+                closedSettings = #True 
+                
+            EndSelect
+            
+          Case #PB_Event_CloseWindow
+            Debug "Settings window close event"
+            StopCapture()
+            closedSettings = #True
+        EndSelect
+        
+        If closedSettings
+          Debug "Closing settings window"
+          RemoveWindowTimer(#WINDOW_SETTINGS, 1)
+          HideWindow(#WINDOW_SETTINGS, #True)
+          
+          ; CRITICAL: Re-install keyboard hook after settings closes!
+          InstallKeyboardHook()
+          
+          ShowMainWindow()
+        EndIf
+        
+    EndSelect
   ForEver
-EndProcedure 
+EndProcedure
 
 ;=====================================================================
 ;-  Cleanup
@@ -1122,7 +1800,9 @@ EndProcedure
 
 Procedure CleanUp()
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    
+    If themeBgBrush
+      DeleteObject_(themeBgBrush)
+    EndIf
     RemoveKeyboardHook()
     If themeBgBrush
       DeleteObject_(themeBgBrush)
@@ -1137,9 +1817,9 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 733
-; FirstLine = 728
-; Folding = -----------
+; CursorPosition = 1581
+; FirstLine = 1577
+; Folding = --------------
 ; Optimizer
 ; EnableThread
 ; EnableXP
