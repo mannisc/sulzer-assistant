@@ -1,27 +1,204 @@
-﻿
+﻿;=====================================================================
+;-  Configuration & App Start
+;=====================================================================
+
+Global name.s = "Sulzer Assistant"
+
+Declare EnsureSingleInstance()
+EnsureSingleInstance() ; Bring running instance to front, do not open second instance
+
+Declare OpenMainWindow()
+Declare MainLoop()
+Declare CleanUp()
+Declare.s GetHostName(url.s)
+Declare.s EscapeHostForFileName(url.s)
+Declare GetAppIcon()
+Declare ErrorHandler()
+Declare IsDarkModeActive()
+Declare LoadCurrentWindowDimension()
+Declare SetStaticWebviewGadgetJSSnippets()
+Declare CreateTrayIcon()
+Declare BuildTrayMenu()
+
+Global url.s  = "https://chat.sulzer.de"
+; Change url and name with app params
+If CountProgramParameters() > 0
+  url  = ProgramParameter(0)
+EndIf
+If CountProgramParameters() > 1
+  name = ProgramParameter(1)
+EndIf
+
+Structure WindowDimension
+  x.l
+  y.l
+  w.l
+  h.l
+  desktop.l
+  desk_w.l
+  desk_h.l
+EndStructure
+
+Global host.s = GetHostName(url.s)
+Global safeHost.s = EscapeHostForFileName(LCase(host))
+Global appTemp.s  = GetTemporaryDirectory() + "MyWebViewApp\"
+Global jsonPath.s = appTemp + safeHost + "-settings.json"
+Global appIcon = GetAppIcon()
+Global isDarkModeActiveCached = IsDarkModeActive()
+Global webviewVisible = #False
+Global numberDesktops = ExamineDesktops()
+Global windowDimension.WindowDimension
+Global trayIconID = 1
+Global menuOpenID = 100
+Global menuSettingsID = 101
+Global menuExitID = 102
+
+CreateDirectory(appTemp)
+
+OnErrorCall(@ErrorHandler()) ; comment out if not needed 
+
+#Min_Window_Width  = 300
+#Min_Window_Height = 350
+
+SetStaticWebviewGadgetJSSnippets()
+
+LoadCurrentWindowDimension()
+OpenMainWindow()
+CreateTrayIcon()
+BuildTrayMenu()
+
+MainLoop()
+
+CleanUp()
+
+End  
+
+
+
+;-======================APP PROCEDURES=====================================================================
+
+;=====================================================================
+;-  JS Script to adjust assistant for Desktop App
+;=====================================================================
+
+
+Procedure SetStaticWebviewGadgetJSSnippets()
+  
+  Global activateInputJS.s = ""+
+                             ~"(() => {\n" +
+                             ~"   document.querySelectorAll('div[contenteditable]').forEach(w => {\n" +
+                             ~"     if (!w.closest('#chat-input')) return;\n" +
+                             ~"     w.setAttribute('tabindex','-1');\n" +
+                             ~"     w.focus();\n" +
+                             ~"     const p = w.querySelector('.ProseMirror p:last-child');\n" +
+                             ~"     if(!p) return;\n" +
+                             ~"     const r = document.createRange(), s = window.getSelection();\n" +
+                             ~"     r.selectNodeContents(p);\n" +
+                             ~"     r.collapse(false);\n" +
+                             ~"     s.removeAllRanges();\n" +
+                             ~"     s.addRange(r);\n" +
+                             ~"   });\n" +
+                             ~"})();"
+  
+  Global disableAutomaticScrollJS.s =  ""+
+                                       ~"(() => {\n" +
+                                       ~"  //window.scrollBy = function() {};\n" +
+                                       ~"  //window.scroll = function() {};\n" +
+                                       ~"  //Element.prototype.scrollIntoView = function() {};\n" +
+                                       ~"  const patchScroll = () => {\n" +
+                                       ~"    document.querySelectorAll('*').forEach(el => {\n" +
+                                       ~"      //el.scrollIntoView = function() {};\n" +
+                                       ~"      if(!el.scrollToOrig){el.scrollToOrig = el.scrollTo};\n" +
+                                       ~"      el.scrollTo = function(...args) {\n" +
+                                       ~" if(args[0] && args[0].behavior === 'smooth') {\n" +
+                                       ~"   el.scrollToOrig(...args);\n" +
+                                       activateInputJS +  ~"\n" +
+                                       ~" }\n" +
+                                       ~"      };\n" +
+                                       ~"    });\n" +
+                                       ~"  };\n" +
+                                       ~"  patchScroll();\n" +
+                                       ~"  const observer = new MutationObserver(patchScroll);\n" +
+                                       ~"  observer.observe(document.body, {childList: true, subtree: true});\n" +
+                                       ~"})();"
+  
+  
+  Global disableUnnecessaryScrollbar.s = ""+
+                                         ~"(() => {\n" +
+                                         ~"  var el = document.getElementById('pb-start-style');\n" +
+                                         ~"  if (el) el.remove();\n" +
+                                         ~"  const style = document.createElement('style');\n" +
+                                         ~"  style.id = 'pb-start-style';\n" +
+                                         ~"  style.textContent = `\n" +
+                                         ~"    .m-auto.w-full.max-w-6xl.px-2.translate-y-6.py-24.text-center {\n" +
+                                         ~"     padding-block: 0 !important;\n" +
+                                         ~"  }\n" +
+                                         ~"`\n" +
+                                         ~"  document.head.appendChild(style);\n" +
+                                         ~"})();"
+  
+EndProcedure
+
+Procedure.s SetWebviewStyleJS()
+  Protected bgHex.s
+  If isDarkModeActiveCached
+    bgHex = "#0a0a0a"   ; black background
+  Else
+    bgHex = "#FFFFFF"   ; white background
+  EndIf
+ProcedureReturn ~"(() => {\n" +
+                 ~"  var el = document.getElementById('pb-theme-style');\n" +
+                 ~"  if (el) el.remove();\n" +
+                 ~"  const style = document.createElement('style');\n" +
+                 ~"  style.id = 'pb-theme-style';\n" +
+                 ~"  style.textContent = `\n" +
+                 ~"    :root {\n" +
+                 ~"      --color-gray-900: rgb(10, 10, 10);\n" +
+                 ~"    }\n" +
+                 ~"    html, body {\n" +
+                 "      background: " + bgHex + " !important;\n" +
+                 "      background-color: " + bgHex + " !important;\n" +
+                 ~"    }\n" +
+                 ~"    .absolute.w-full.h-full.flex.z-50 {\n" +
+                 ~"      background: #fff !important;\n" +
+                 ~"      background-color: #fff !important;\n" +
+                 ~"    }\n" +
+                 ~"    /* Info text below input, reduce space */\n" +
+                 ~"    .mx-auto.max-w-2xl.font-primary.mt-2 {\n" +
+                 ~"      max-height: 25px !important;\n" +
+                 ~"      margin-top: 0 !important;\n" +
+                 ~"      margin-bottom: 70px !important;\n" +
+                 ~"    }\n" +
+                 ~"  `;\n" +
+                 ~"  document.head.appendChild(style);\n" +
+                 ~"})();"
+
+
+  
+EndProcedure
+
+
+;=====================================================================
+;-  ErrorHandler
+;=====================================================================
 
 Procedure ErrorHandler()
- 
   ErrorMessage$ = "A program error was detected:" + Chr(13)
   ErrorMessage$ + Chr(13)
   ErrorMessage$ + "Error Message:   " + ErrorMessage()      + Chr(13)
   ErrorMessage$ + "Error Code:      " + Str(ErrorCode())    + Chr(13)
   ErrorMessage$ + "Code Address:    " + Str(ErrorAddress()) + Chr(13)
- 
   If ErrorCode() = #PB_OnError_InvalidMemory
     ErrorMessage$ + "Target Address:  " + Str(ErrorTargetAddress()) + Chr(13)
   EndIf
- 
   If ErrorLine() = -1
     ErrorMessage$ + "Sourcecode line: Enable OnError lines support to get code line information." + Chr(13)
   Else
     ErrorMessage$ + "Sourcecode line: " + Str(ErrorLine()) + Chr(13)
     ErrorMessage$ + "Sourcecode file: " + ErrorFile() + Chr(13)
   EndIf
- 
   ErrorMessage$ + Chr(13)
   ErrorMessage$ + "Register content:" + Chr(13)
- 
   CompilerSelect #PB_Compiler_Processor
     CompilerCase #PB_Processor_x86
       ErrorMessage$ + "EAX = " + Str(ErrorRegister(#PB_OnError_EAX)) + Chr(13)
@@ -32,7 +209,6 @@ Procedure ErrorHandler()
       ErrorMessage$ + "ESI = " + Str(ErrorRegister(#PB_OnError_ESI)) + Chr(13)
       ErrorMessage$ + "EDI = " + Str(ErrorRegister(#PB_OnError_EDI)) + Chr(13)
       ErrorMessage$ + "ESP = " + Str(ErrorRegister(#PB_OnError_ESP)) + Chr(13)
- 
     CompilerCase #PB_Processor_x64
       ErrorMessage$ + "RAX = " + Str(ErrorRegister(#PB_OnError_RAX)) + Chr(13)
       ErrorMessage$ + "RBX = " + Str(ErrorRegister(#PB_OnError_RBX)) + Chr(13)
@@ -43,59 +219,23 @@ Procedure ErrorHandler()
       ErrorMessage$ + "RDI = " + Str(ErrorRegister(#PB_OnError_RDI)) + Chr(13)
       ErrorMessage$ + "RSP = " + Str(ErrorRegister(#PB_OnError_RSP)) + Chr(13)
       ErrorMessage$ + "Display of registers R8-R15 skipped."         + Chr(13)
- 
   CompilerEndSelect
   Debug "ERROR:"
   Debug ErrorMessage$
- 
 EndProcedure
- 
-; Setup the error handler.
-;
-OnErrorCall(@ErrorHandler())
-
-
-
-
-;=====================================================================
-;-  WebView Browser – Multi-desktop aware, clean JSON I/O, resolution match
-;  + System-tray icon (Open / Exit) – Windows-only API safe
-;=====================================================================
-
-
-#Min_Window_Width  = 300
-#Min_Window_Height = 350
-
-
-;=====================================================================
-;-  Configuration & Parameters
-;=====================================================================
-
-Global url.s  = "https://chat.sulzer.de"
-Global name.s = "Sulzer Assistant"
-
-If CountProgramParameters() > 0
-  url  = ProgramParameter(0)
-EndIf
-If CountProgramParameters() > 1
-  name = ProgramParameter(1)
-EndIf
-
 
 ;=====================================================================
 ;-  Window Fade-In & Resize
 ;=====================================================================
-Procedure ShowWindowFadeInHandle(hWnd)
-  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+  Procedure ShowWindowFadeInWinHandle(hWnd)
     ShowWindow_(hWnd, #SW_SHOWNA)
     UpdateWindow_(hWnd)
     RedrawWindow_(hWnd, #Null, #Null, #RDW_UPDATENOW | #RDW_ALLCHILDREN | #RDW_FRAME)
-    
     Protected msg.MSG
     While PeekMessage_(@msg, hWnd, #WM_PAINT, #WM_PAINT, #PM_REMOVE)
       DispatchMessage_(@msg)
     Wend
-    
     Protected hUser32 = OpenLibrary(#PB_Any, "user32.dll")
     If hUser32
       Protected *AnimateWindow = GetFunction(hUser32, "AnimateWindow")
@@ -104,15 +244,13 @@ Procedure ShowWindowFadeInHandle(hWnd)
       EndIf
       CloseLibrary(hUser32)
     EndIf
-  CompilerElse
-    HideWindow(winID, #False)
-  CompilerEndIf
-EndProcedure
+  EndProcedure
+CompilerEndIf
 
 Procedure ShowWindowFadeIn(winID)
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected hWnd = WindowID(winID)
-    ShowWindowFadeInHandle(hWnd)
+    ShowWindowFadeInWinHandle(hWnd)
   CompilerElse
     HideWindow(winID, #False)
   CompilerEndIf
@@ -121,123 +259,87 @@ EndProcedure
 ;=====================================================================
 ;-  Window Management Helpers
 ;=====================================================================
-
-Procedure BringWindowToFrontHandlXe(hWnd)
-  Protected fgThread, targetThread
-  
-  If IsWindow_(hWnd) = 0
-    ProcedureReturn
-  EndIf
-  
-  targetThread = GetWindowThreadProcessId_(hWnd, 0)
-  fgThread = GetWindowThreadProcessId_(GetForegroundWindow_(), 0)
-  
-  ; Temporarily attach input so we can set foreground properly
-  If targetThread <> fgThread
-    AttachThreadInput_(fgThread, targetThread, #True)
-  EndIf
-  
-  ; Show window if hidden (avoids transition)
-  ;ShowWindow_(hWnd, #SW_SHOW)
-  
-  ; Bring to front and activate
-  
-  SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
-  
-  ;SetForegroundWindow_(hWnd)
-  ;SetFocus_(hWnd)
-  ; BringWindowToTop_(hWnd)
-  
-  If targetThread <> fgThread
-    AttachThreadInput_(fgThread, targetThread, #False)
-  EndIf
-EndProcedure
-
-
-
-
-Procedure BringWindowToFrontHandle(hWnd)
-  Protected foregroundHwnd = GetForegroundWindow_()
-  
-  
-  If hWnd = foregroundHwnd
-    ShowWindow_(hWnd, #SW_RESTORE)
-    ProcedureReturn
-  EndIf
-  
-  ; ShowWindow_(hWnd, #SW_RESTORE)
-  ;FlashWindow_(hWnd, #True)
-  
-  Protected foregroundThread = GetWindowThreadProcessId_(foregroundHwnd, #Null)
-  Protected currentThread    = GetCurrentThreadId_()
-  
-  If AttachThreadInput_(currentThread, foregroundThread, #True)
-    ; BringWindowToTop_(hWnd)
-    SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
-    ;SetForegroundWindow_(hWnd)
-    ;SetWindowPos_(hWnd, #HWND_NOTOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
-    
-    ; SetForegroundWindow_(hWnd)
-    
-    AttachThreadInput_(currentThread, foregroundThread, #False)
-  Else
-    SetWindowPos_(hWnd, #HWND_TOP, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
-    SetForegroundWindow_(hWnd)
-  EndIf
-EndProcedure
-Procedure BringWindowToFront(window)
-  Protected hWnd = WindowID(window)
-  BringWindowToFrontHandle(hWnd)
-EndProcedure 
-;=====================================================================
-;  SINGLE INSTANCE CHECK – Exit if already running, bring other to front
-;=====================================================================
-
 CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  Global MutexHandle = CreateMutex_(#Null, #True, @"SulzerAssistantWebViewMutex")
-  If GetLastError_() = #ERROR_ALREADY_EXISTS
-    ; Another instance is running → find its window and bring it to front
-    hWnd = FindWindow_("pb_window_0", #Null)  ; PureBasic main window class
-    If hWnd = 0
-      ; Fallback: try by title (less reliable, but safe)
-      hWnd = FindWindow_(#Null, @name)
-    EndIf 
-    If hWnd
-      BringWindowToFrontHandle(hWnd)
-      ; Restore if minimized
+  
+  Procedure BringWindowToFrontWinHandle(hWnd)
+    Protected foregroundHwnd = GetForegroundWindow_()
+    If hWnd = foregroundHwnd
       ShowWindow_(hWnd, #SW_RESTORE)
-      ; Bring to front
-      ; SetForegroundWindow_(hWnd)
-      ; FlashWindow_(hWnd, #True)
+      ProcedureReturn
     EndIf
-    End  ; Exit this instance
-  EndIf
+    ; commented out lines result in flicker and are not neccessary atm
+    ;ShowWindow_(hWnd, #SW_RESTORE)
+    ;FlashWindow_(hWnd, #True)
+    Protected foregroundThread = GetWindowThreadProcessId_(foregroundHwnd, #Null)
+    Protected currentThread    = GetCurrentThreadId_()
+    If AttachThreadInput_(currentThread, foregroundThread, #True)
+      ShowWindow_(hWnd, #SW_RESTORE)
+      ; BringWindowToTop_(hWnd)
+      SetWindowPos_(hWnd, #HWND_TOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE )
+      ;SetForegroundWindow_(hWnd)
+      ;SetWindowPos_(hWnd, #HWND_NOTOPMOST, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
+      ;SetForegroundWindow_(hWnd)
+      AttachThreadInput_(currentThread, foregroundThread, #False)
+    Else
+      SetWindowPos_(hWnd, #HWND_TOP, 0, 0, 0, 0, #SWP_NOMOVE | #SWP_NOSIZE)
+      SetForegroundWindow_(hWnd)
+    EndIf
+  EndProcedure
 CompilerEndIf
 
-;=====================================================================
-;-  Windows Dark Mode Support
-;=====================================================================
-  Global IsDarkModeActiveCached = #False
+Procedure BringWindowToFront(window)
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    Protected hWnd = WindowID(window)
+    BringWindowToFrontWinHandle(hWnd) 
+  CompilerEndIf
+EndProcedure 
 
-CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  
-  Procedure IsDarkModeActive()
+;=====================================================================
+;-  Single Instance Check
+;=====================================================================
+
+Procedure EnsureSingleInstance()
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    Global MutexHandle = CreateMutex_(#Null, #True, @"SulzerAssistantWebViewMutex")
+    If GetLastError_() = #ERROR_ALREADY_EXISTS
+      ; Another instance is running → find its window and bring it to front
+      hWnd = FindWindow_(#Null, @name)
+      If hWnd = 0
+        ; Fallback: try by title (less reliable, but safe)
+        hWnd = FindWindow_("pb_window_0", #Null)  ; PureBasic main window class
+      EndIf 
+      If hWnd
+         ShowWindow_(hWnd, #SW_RESTORE)
+         BringWindowToFrontWinHandle(hWnd)
+      EndIf
+      End;Exit this instance
+    EndIf
+  CompilerEndIf
+EndProcedure 
+;=====================================================================
+;-  Window Dark Mode Support
+;=====================================================================
+
+Procedure IsDarkModeActive()
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected key, result = 0, value.l, size = SizeOf(Long)
     If RegOpenKeyEx_(#HKEY_CURRENT_USER, "Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", 0, #KEY_READ, @key) = #ERROR_SUCCESS
       If RegQueryValueEx_(key, "AppsUseLightTheme", 0, 0, @value, @size) = #ERROR_SUCCESS
         result = Bool(value = 0)
-        IsDarkModeActiveCached = result
       EndIf
       RegCloseKey_(key)
     EndIf
     ProcedureReturn result
-  EndProcedure
-  
-  IsDarkModeActive()
-  
+  CompilerElse
+    ProcedureReturn #False
+  CompilerEndIf 
+EndProcedure
+
+
+; For Windows
+CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   
   #DWMWA_USE_IMMERSIVE_DARK_MODE = 20
-  
   Procedure DwmSetWindowAttributeDynamic(hwnd.i, dwAttribute.i, *pvAttribute, cbAttribute.i)
     Protected result = 0
     Protected hDll = OpenLibrary(#PB_Any, "dwmapi.dll")
@@ -255,37 +357,33 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected attrValue.i = Bool(enable)
     DwmSetWindowAttributeDynamic(hwnd, #DWMWA_USE_IMMERSIVE_DARK_MODE, @attrValue, SizeOf(Integer))
   EndProcedure
-CompilerEndIf
-
-
-Procedure SetWindowThemeDynamic(hwnd.i, subAppName.s)
-  Protected hUxTheme = OpenLibrary(#PB_Any, "uxtheme.dll")
-  If hUxTheme
-    Protected *fn = GetFunction(hUxTheme, "SetWindowTheme")
-    If *fn
-      CallFunctionFast(*fn, hwnd, @subAppName, 0)
+  
+  
+  
+  Procedure SetWindowThemeDynamic(hwnd.i, subAppName.s)
+    Protected hUxTheme = OpenLibrary(#PB_Any, "uxtheme.dll")
+    If hUxTheme
+      Protected *fn = GetFunction(hUxTheme, "SetWindowTheme")
+      If *fn
+        CallFunctionFast(*fn, hwnd, @subAppName, 0)
+      EndIf
+      CloseLibrary(hUxTheme)
     EndIf
-    CloseLibrary(hUxTheme)
-  EndIf
-EndProcedure
-
-Procedure ApplyGadgetTheme(gadgetId)
+  EndProcedure
   
-  ; Only apply if dark mode active
-  If IsDarkModeActiveCached
-    SetWindowThemeDynamic(gadgetId, "DarkMode_Explorer")
-  Else
-    SetWindowThemeDynamic(gadgetId, "Explorer")
-  EndIf
-  
-  ; Force repaint
-  SendMessage_(gadgetId, #WM_THEMECHANGED, 0, 0)
-  InvalidateRect_(gadgetId, #Null, #True)
-EndProcedure
-
-
-CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  
+  Procedure ApplyGadgetTheme(gadgetId)
+    
+    ; Only apply if dark mode active
+    If isDarkModeActiveCached
+      SetWindowThemeDynamic(gadgetId, "DarkMode_Explorer")
+    Else
+      SetWindowThemeDynamic(gadgetId, "Explorer")
+    EndIf
+    
+    ; Force repaint
+    SendMessage_(gadgetId, #WM_THEMECHANGED, 0, 0)
+    InvalidateRect_(gadgetId, #Null, #True)
+  EndProcedure
   
   
   
@@ -304,159 +402,37 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     InvalidateRect_(hWnd, #Null, #True)
     ProcedureReturn #True
   EndProcedure
-  
-  
-  
-  
-  
-  
-  
-  
-  Procedure ApplyThemeToWindowHandle(hWnd)
+ 
+  Procedure ApplyThemeToWinHandle(hWnd)
     Protected bg, fg
-    If IsDarkModeActiveCached
+    If isDarkModeActiveCached
       bg = RGB(10,10,10)
       fg = RGB(220, 220, 220)
     Else
       bg = RGB(255, 255, 255)
       fg = RGB(0, 0, 0)
     EndIf 
-    
     SetWindowColor(0, bg)
-    SetDarkTitleBar(hWnd, IsDarkModeActiveCached)
+    SetDarkTitleBar(hWnd, isDarkModeActiveCached)
     EnumChildWindows_(hWnd, @ApplyThemeToWindowChildren(), 0)
-    
   EndProcedure
-CompilerElse
-  Procedure ApplyThemeToWindowHandle(hWnd) : EndProcedure
 CompilerEndIf
 
 
-
-Procedure SetWebViewStyle()
-  Protected bgHex.s, fgHex.s
-  
-  
-  If IsDarkModeActiveCached
-    bgHex = "#0a0a0a"   ; black background
-  Else
-    bgHex = "#FFFFFF"   ; white background
-  EndIf
-  
-  
-  If IsGadget(0)
-    Protected js.s
-    
-    js = ~"(() => {\n" +
-         ~"  var el = document.getElementById('pb-theme-style');\n" +
-         ~"  if (el) el.remove();\n" +
-         ~"  const style = document.createElement('style');\n" +
-         ~"  style.id = 'pb-theme-style';\n" +
-         ~"  style.textContent = `\n" +
-         ~"    :root {\n" +
-         ~"      --color-gray-900: rgb(10, 10, 10);\n" +
-         ~"    }\n" +
-         ~"    html, body {\n" +
-         ~"     background: " + bgHex + ~" !important;\n" +
-         ~"     background-color: " + bgHex + ~" !important;\n" +
-         ~"  }\n" +
-         ~"`\n" +
-         ~"  document.head.appendChild(style);\n" +
-         ~"})();"
-    
-    
-    WebViewExecuteScript(0, js)
-    
-    ;Disable autoscroll (auto), allow manual scrolling (smooth)
-js = ~"(() => {\n" +
-     ~"  window.scrollBy = function() {};\n" +
-     ~"  window.scroll = function() {};\n" +
-     ~"  Element.prototype.scrollIntoView = function() {};\n" +
-     ~"  const patchScroll = () => {\n" +
-     ~"    document.querySelectorAll('*').forEach(el => {\n" +
-     ~"      el.scrollIntoView = function() {};\n" +
-     ~"      if(!el.scrollToOrig){el.scrollToOrig = el.scrollTo};\n" +
-     ~"      el.scrollTo = function(...args) {\n" +
-     ~"        if(args[0] && args[0].behavior === 'smooth') {\n" +
-     ~"          el.scrollToOrig(...args);\n" +
-     ~"          document.querySelectorAll('div[contenteditable]').forEach(w => {\n" +
-     ~"            if (!w.closest('#chat-input')) return;\n" +
-     ~"            w.setAttribute('tabindex','-1');\n" +
-     ~"            w.focus();\n" +
-     ~"            const p = w.querySelector('.ProseMirror p:last-child');\n" +
-     ~"            if(!p) return;\n" +
-     ~"            const r = document.createRange(), s = window.getSelection();\n" +
-     ~"            r.selectNodeContents(p);\n" +
-     ~"            r.collapse(false);\n" +
-     ~"            s.removeAllRanges();\n" +
-     ~"            s.addRange(r);\n" +
-     ~"          });\n" +
-     ~"        }\n" +
-     ~"      };\n" +
-     ~"    });\n" +
-     ~"  };\n" +
-     ~"  patchScroll();\n" +
-     ~"  const observer = new MutationObserver(patchScroll);\n" +
-     ~"  observer.observe(document.body, {childList: true, subtree: true});\n" +
-     ~"})();"
-
-
-
-
-    
-    
-Debug js
-
-     WebViewExecuteScript(0, js)
-  EndIf
-EndProcedure
-Procedure SetWebViewStyleZoom(active)
-  Protected bgHex.s, fgHex.s
-  ProcedureReturn
-  
-  If IsDarkModeActiveCached
-    bgHex = "#0a0a0a"   ; black background
-  Else
-    bgHex = "#FFFFFF"   ; white background
-  EndIf
-  
-  
-  If IsGadget(0)
-    
-    If active
-      Protected js.s
-      
-      
-      
-      js = ~"(() => {\n" +
-           ~"  var el = document.getElementById('force-resize-hidden-style');\n" +
-           ~"  if (el) el.remove();\n" +
-           ~"  const style = document.createElement('style');\n" +
-           ~"  style.id = 'force-resize-hidden-style';\n" +
-           ~"  style.textContent = `\n" +
-           ~"    body {\n" +
-           ~"    }\n" +
-           ~"  `;\n" +
-           ~"  document.head.appendChild(style);\n" +
-           ~"})();"
-      
-      
-      
-      Debug js
-    Else
-      js = ~"(() => {\n" +
-           ~"  var el = document.getElementById('force-resize-hidden-style');\n" +
-           ~"  if (el) el.remove();\n" +
-           ~"})();"
-    EndIf 
-    
-    WebViewExecuteScript(0, js)
-    
-    
-  EndIf
-EndProcedure
 ;=====================================================================
-;-  Safe Filename from Host
+;-  Inject JS into the webview
+;=====================================================================
+
+Procedure InjectWebViewCustomJS()
+  If IsGadget(0)
+    WebViewExecuteScript(0, SetWebviewStyleJS())
+    WebViewExecuteScript(0, disableAutomaticScrollJS) ;Disable autoscroll (auto), allow manual scrolling (smooth)
+    WebViewExecuteScript(0, disableUnnecessaryScrollbar)
+  EndIf
+EndProcedure
+
+;=====================================================================
+;-  Host name and safe Filename from Host
 ;=====================================================================
 
 Procedure.s EscapeHostForFileName(url.s)
@@ -525,63 +501,48 @@ Procedure.s EscapeHostForFileName(url.s)
   ProcedureReturn fullKey
 EndProcedure
 
-;=====================================================================
-;-  Host & Paths
-;=====================================================================
 
-Global host.s = ""
+Procedure.s GetHostName(url.s)
+  Protected  host.s
+  pos1 = FindString(url, "://", 1)
+  If pos1 > 0
+    pos1 + 3
+    pos2 = FindString(url, "/", pos1)
+    If pos2 = 0 : pos2 = Len(url) + 1 : EndIf
+    host = Mid(url, pos1, pos2 - pos1)
+  EndIf
+  ProcedureReturn host
+EndProcedure 
 
-pos1 = FindString(url, "://", 1)
-If pos1 > 0
-  pos1 + 3
-  pos2 = FindString(url, "/", pos1)
-  If pos2 = 0 : pos2 = Len(url) + 1 : EndIf
-  host = Mid(url, pos1, pos2 - pos1)
-EndIf
-
-Global safeHost.s = EscapeHostForFileName(LCase(host))
-
-Global appTemp.s  = GetTemporaryDirectory() + "MyWebViewApp\"
-CreateDirectory(appTemp)
-Global jsonPath.s = appTemp + safeHost + "-settings.json"
 
 ;=====================================================================
 ;-  Icon Handling (Windows only)
 ;=====================================================================
 
-CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  Procedure GetAppIcon()
+
+Procedure GetAppIcon()
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected hIcon, exePath.s = ProgramFilename()
     ExtractIconEx_(exePath, 0, @hIcon, 0, 1)
     If hIcon
       ProcedureReturn hIcon
     EndIf
     ProcedureReturn LoadIcon_(0, #IDI_APPLICATION)
-  EndProcedure
-CompilerElse
-  Procedure.i GetAppIcon() : ProcedureReturn 0 : EndProcedure
-CompilerEndIf
+  CompilerElse
+    ProcedureReturn 0 : 
+  CompilerEndIf
+EndProcedure
 
-Global AppIcon = GetAppIcon()
 
 ;=====================================================================
 ;-  Geometry Structure & Desktop Helpers
 ;=====================================================================
 
-Structure WindowGeom
-  x.l
-  y.l
-  w.l
-  h.l
-  desktop.l
-  desk_w.l
-  desk_h.l
-EndStructure
 
 CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   Procedure IsRectOnDesktop(x.l, y.l, w.l, h.l, deskIdx.l)
-    Protected numDesks = ExamineDesktops()
-    If deskIdx < 0 Or deskIdx >= numDesks
+    Protected numberDesktops = ExamineDesktops()
+    If deskIdx < 0 Or deskIdx >= numberDesktops
       ProcedureReturn #False
     EndIf
     Protected dx = DesktopX(deskIdx), dy = DesktopY(deskIdx)
@@ -590,8 +551,8 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   EndProcedure
   
   Procedure FindCurrentDesktop(x.l, y.l, w.l, h.l)
-    Protected numDesks = ExamineDesktops()
-    For i = 0 To numDesks - 1
+    Protected numberDesktops = ExamineDesktops()
+    For i = 0 To numberDesktops - 1
       If IsRectOnDesktop(x, y, w, h, i)
         ProcedureReturn i
       EndIf
@@ -607,7 +568,7 @@ CompilerEndIf
 ;-  JSON Geometry Load / Save
 ;=====================================================================
 
-Procedure LoadGeometryFromJSON(path.s, *geom.WindowGeom)
+Procedure LoadGeometryFromJSON(path.s, *geom.WindowDimension)
   If FileSize(path) <= 0
     ProcedureReturn #False
   EndIf
@@ -636,7 +597,7 @@ Procedure LoadGeometryFromJSON(path.s, *geom.WindowGeom)
   ProcedureReturn #True
 EndProcedure
 
-Procedure SaveGeometryToJSON(path.s, *geom.WindowGeom)
+Procedure SaveGeometryToJSON(path.s, *geom.WindowDimension)
   Protected json = CreateJSON(#PB_Any, #PB_JSON_NoCase)
   If Not json
     ProcedureReturn #False
@@ -661,14 +622,14 @@ EndProcedure
 ;-  Geometry Management
 ;=====================================================================
 
-Procedure SaveCurrentGeometry()
+Procedure SaveCurrentWindowDimensions()
   If Not IsWindow(0) : ProcedureReturn : EndIf
   If  IsZoomed_(WindowID(0)) Or IsIconic_(WindowID(0))
     ProcedureReturn
   EndIf 
-
-  Protected numDesks = ExamineDesktops()
-  Protected saveGeom.WindowGeom
+  
+  Protected numberDesktops = ExamineDesktops()
+  Protected saveGeom.WindowDimension
   
   saveGeom\x = DesktopScaledX(WindowX(0))
   saveGeom\y = DesktopScaledY(WindowY(0)) 
@@ -677,7 +638,7 @@ Procedure SaveCurrentGeometry()
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     saveGeom\desktop = FindCurrentDesktop(saveGeom\x, saveGeom\y, saveGeom\w, saveGeom\h)
-    If saveGeom\desktop >= 0 And saveGeom\desktop < numDesks
+    If saveGeom\desktop >= 0 And saveGeom\desktop < numberDesktops
       saveGeom\desk_w = DesktopWidth(saveGeom\desktop)
       saveGeom\desk_h = DesktopHeight(saveGeom\desktop)
     Else
@@ -696,93 +657,86 @@ EndProcedure
 ;=====================================================================
 ;-  Load & Validate Saved Geometry
 ;=====================================================================
-
-Global geom.WindowGeom
-geom\w = 800
-geom\h = 750
-geom\x = #PB_Ignore
-geom\y = #PB_Ignore
-geom\desktop = 0
-geom\desk_w = 0
-geom\desk_h = 0
-
-If LoadGeometryFromJSON(jsonPath, @geom)
-Else
-EndIf
-
-valid = #False
-Global numDesks = ExamineDesktops()
-
-If geom\x <> #PB_Ignore And geom\y <> #PB_Ignore And geom\w >= #Min_Window_Width And geom\h >= #Min_Window_Height
-  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    If geom\desktop >= 0 And geom\desktop < numDesks
-      If IsRectOnDesktop(geom\x, geom\y, geom\w, geom\h, geom\desktop)
-        valid = #True
-      EndIf
-    EndIf
-    
-    If Not valid And geom\desk_w > 0 And geom\desk_h > 0
-      For i = 0 To numDesks - 1
-        If DesktopWidth(i) = geom\desk_w And DesktopHeight(i) = geom\desk_h
-          If IsRectOnDesktop(geom\x, geom\y, geom\w, geom\h, i)
-            geom\desktop = i
+Procedure LoadCurrentWindowDimension()
+  numberDesktops = ExamineDesktops()
+  
+  windowDimension\w = 800
+  windowDimension\h = 750
+  windowDimension\x = #PB_Ignore
+  windowDimension\y = #PB_Ignore
+  windowDimension\desktop = 0
+  windowDimension\desk_w = 0
+  windowDimension\desk_h = 0
+  valid = #False
+  
+  If LoadGeometryFromJSON(jsonPath, @windowDimension)    
+    If windowDimension\x <> #PB_Ignore And windowDimension\y <> #PB_Ignore And windowDimension\w >= #Min_Window_Width And windowDimension\h >= #Min_Window_Height
+      CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+        If windowDimension\desktop >= 0 And windowDimension\desktop < numberDesktops
+          If IsRectOnDesktop(windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, windowDimension\desktop)
             valid = #True
-            Break
           EndIf
         EndIf
-      Next
+        
+        If Not valid And windowDimension\desk_w > 0 And windowDimension\desk_h > 0
+          For i = 0 To numberDesktops - 1
+            If DesktopWidth(i) = windowDimension\desk_w And DesktopHeight(i) = windowDimension\desk_h
+              If IsRectOnDesktop(windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, i)
+                windowDimension\desktop = i
+                valid = #True
+                Break
+              EndIf
+            EndIf
+          Next
+        EndIf
+        
+        If Not valid
+          For i = 0 To numberDesktops - 1
+            If IsRectOnDesktop(windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, i)
+              windowDimension\desktop = i
+              valid = #True
+              Break
+            EndIf
+          Next
+        EndIf
+      CompilerEndIf
     EndIf
     
-    If Not valid
-      For i = 0 To numDesks - 1
-        If IsRectOnDesktop(geom\x, geom\y, geom\w, geom\h, i)
-          geom\desktop = i
-          valid = #True
-          Break
-        EndIf
-      Next
-    EndIf
-  CompilerEndIf
-EndIf
-
-If Not valid And numDesks > 0
-  geom\desktop = 0
-  geom\x = DesktopX(0) + (DesktopWidth(0) - geom\w) / 2
-  geom\y = DesktopY(0) + (DesktopHeight(0) - geom\h) / 2
-EndIf
+  EndIf
+  If Not valid And numberDesktops > 0
+    windowDimension\desktop = 0
+    windowDimension\x = DesktopX(0) + (DesktopWidth(0) - windowDimension\w) / 2
+    windowDimension\y = DesktopY(0) + (DesktopHeight(0) - windowDimension\h) / 2
+  EndIf
+EndProcedure
 
 ;=====================================================================
 ;-  System Tray (Windows only)
 ;=====================================================================
 
-CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  Global TrayIconID = 1
-  Global MenuOpenID = 100
-  Global MenuExitID = 103
+ 
   
   Procedure CreateTrayIcon()
     If IsWindow(0)
-      AddSysTrayIcon(TrayIconID, WindowID(0), AppIcon)
-      SysTrayIconToolTip(TrayIconID, name)
+      AddSysTrayIcon(trayIconID, WindowID(0), appIcon)
+      SysTrayIconToolTip(trayIconID, name)
     EndIf
   EndProcedure
   
   Procedure RemoveTrayIcon()
-    RemoveSysTrayIcon(TrayIconID)
+    RemoveSysTrayIcon(trayIconID)
   EndProcedure
   
   Procedure BuildTrayMenu()
     CreatePopupMenu(0)
-    MenuItem(MenuOpenID, "Open")
+    MenuItem(menuOpenID, "Open")
     MenuBar()
-    MenuItem(MenuExitID, "Exit")
-    SysTrayIconMenu(TrayIconID, MenuID(0))   
+    MenuItem(menuSettingsID, "Settings")
+    MenuBar()
+    MenuItem(menuExitID, "Exit")
+    SysTrayIconMenu(trayIconID, MenuID(0))   
   EndProcedure
-CompilerElse
-  Procedure CreateTrayIcon() : EndProcedure
-  Procedure RemoveTrayIcon() : EndProcedure
-  Procedure BuildTrayMenu() : EndProcedure
-CompilerEndIf
+
 
 ;=====================================================================
 ;-  Global Hotkey: Ctrl+Alt Double-Tap
@@ -794,7 +748,7 @@ Declare HideMainWindow()
 Procedure FocusInput()
   If IsGadget(0)
     SetActiveGadget(0)
-    WebViewExecuteScript(0, ~"(()=>{const w=document.querySelector('div[contenteditable]');if(!w)return;w.setAttribute('tabindex','-1');w.focus();const p=w.querySelector('.ProseMirror p:last-child');if(!p)return;const r=document.createRange(),s=window.getSelection();r.selectNodeContents(p);r.collapse(!1);s.removeAllRanges();s.addRange(r);})();")
+    WebViewExecuteScript(0, activateInputJS)
   EndIf 
 EndProcedure 
 
@@ -899,11 +853,8 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     
     
     
-    If  vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0) 
-      Debug "#VK_RETURN"
-      
+    If  vKey = #VK_RETURN And Not Shift_Down  And  isDown And GetActiveWindow_() = WindowID(0) And GetForegroundWindow_() =  WindowID(0)       
       If WindowID(0) = foregroundHwnd
-        Debug "-> send enter"
         WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
         keybd_event_(#VK_BACK, 0, 0, 0)
         keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0) 
@@ -912,20 +863,25 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     
     ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
   EndProcedure
-  
+CompilerEndIf
+
   Procedure InstallKeyboardHook()
+    CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     If KeyboardHook = 0
       KeyboardHook = SetWindowsHookEx_(#WH_KEYBOARD_LL, @KeyboardProc(), GetModuleHandle_(0), 0)
     EndIf
+    CompilerEndIf
   EndProcedure
   
   Procedure RemoveKeyboardHook()
+    CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     If KeyboardHook
       UnhookWindowsHookEx_(KeyboardHook)
       KeyboardHook = 0
     EndIf
+    CompilerEndIf
   EndProcedure
-CompilerEndIf
+
 
 ;=====================================================================
 ;-  Window Resize
@@ -941,13 +897,7 @@ Procedure ResizeAppWindow()
     If Not (IsWindow(0) And IsGadget(0))
       ProcedureReturn
     EndIf
-    
     ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))  
-    
-    
-    
-    oldW = WindowWidth(0)
-    oldH = WindowHeight(0)
   CompilerEndIf
 EndProcedure
 
@@ -956,14 +906,12 @@ EndProcedure
 Global themeBgBrush
 Procedure WindowCallback(hwnd, msg, wParam, lParam)
   Protected bg.l
-  If IsDarkModeActiveCached
+  If isDarkModeActiveCached
     bg = RGB(10,10,10)
   Else
     bg = RGB(255, 255, 255)
   EndIf   
-  
-  Select msg
-      
+  Select msg 
     Case #WM_ERASEBKGND
       Protected hdc = wParam
       Protected rect.RECT
@@ -977,7 +925,7 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
         themeName.s = PeekS(lParam)
         If themeName = "ImmersiveColorSet"
           IsDarkModeActive()
-          ApplyThemeToWindowHandle(hwnd)
+          ApplyThemeToWinHandle(hwnd)
           InvalidateRect_(hwnd, #Null, #True)
         EndIf
       EndIf
@@ -987,9 +935,7 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
       If (wParam & $FFFF) <> #WA_INACTIVE
         FocusInput()
       EndIf
-      
   EndSelect
-  
   ProcedureReturn #PB_ProcessPureBasicEvents
 EndProcedure
 
@@ -997,54 +943,44 @@ EndProcedure
 ;-  WebView Ready Callback
 ;=====================================================================
 
-Global webviewVisible = #False
-Procedure ShowGadgetFadeIn(gadgetID, duration = 1800)
+
+Procedure ShowWebViewGadgetThread(gadgetID)
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    ; Animate fade in
+    Delay(150)
+    duration = 800
     Protected hWnd = GadgetID(gadgetID)
     If hWnd = 0 : ProcedureReturn : EndIf
-    
     ; Enable layered window
     Protected style = GetWindowLong_(hWnd, #GWL_EXSTYLE)
     SetWindowLong_(hWnd, #GWL_EXSTYLE, style | #WS_EX_LAYERED)
-    
-    HideGadget(gadgetID, #False)
+    HideGadget(gadgetId, #False)
     SetLayeredWindowAttributes_(hWnd, 0, 0, #LWA_ALPHA)
-    
     Protected startTime = ElapsedMilliseconds()
     Protected endTime = startTime + duration
-    
     Repeat
       Protected now = ElapsedMilliseconds()
       Protected alpha.f = (now - startTime) / (endTime - startTime)
       If alpha > 1 : alpha = 1 : EndIf
-      
       SetLayeredWindowAttributes_(hWnd, 0, 255 * alpha, #LWA_ALPHA)
       Delay(10)
     Until now >= endTime
-    
     SetLayeredWindowAttributes_(hWnd, 0, 255, #LWA_ALPHA)
-    
   CompilerElse   
     HideGadget(0, #False)
-    
-    
   CompilerEndIf
 EndProcedure
-
 
 Procedure ShowWebView()
   If Not webviewVisible
     webviewVisible = #True
-    
-    ShowGadgetFadeIn(gadgetID)
+    CreateThread(@ShowWebViewGadgetThread(), 0)
     FocusInput()
   EndIf 
-  
 EndProcedure
 
 
 Procedure CallbackReadyState(JsonParameters$)
-  
   ShowWebView()
   ProcedureReturn UTF8(~"")
 EndProcedure
@@ -1053,14 +989,9 @@ EndProcedure
 ;-  Window Control Procedures
 ;=====================================================================
 
-
-
-
-
 Procedure OpenMainWindow()
-  If IsWindow(0) : ProcedureReturn : EndIf
   
-  OpenWindow(0, geom\x, geom\y, geom\w, geom\h, name,
+  OpenWindow(0, windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, name,
              #PB_Window_SystemMenu | #PB_Window_MinimizeGadget |
              #PB_Window_MaximizeGadget | #PB_Window_SizeGadget | #PB_Window_Invisible)
   StickyWindow(0,#True)
@@ -1068,41 +999,26 @@ Procedure OpenMainWindow()
   SetWindowCallback(@WindowCallback())
   BindEvent(#PB_Event_SizeWindow, @ResizeAppWindow(), 0)
   
-  Protected hWnd = WindowID(0)
-  
-  
+  InstallKeyboardHook()
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    InstallKeyboardHook()
-    ApplyThemeToWindowHandle(hWnd)
-    SetWindowPos_(hWnd, 0, geom\x, geom\y, geom\w, geom\h, #SWP_NOZORDER | #SWP_NOACTIVATE)
-    
-    
-    SendMessage_(hWnd, #WM_SETICON, #ICON_SMALL, AppIcon)
-    SendMessage_(hWnd, #WM_SETICON, #ICON_BIG, AppIcon)
+    Protected hWnd = WindowID(0)
+    ApplyThemeToWinHandle(hWnd)
+    SetWindowPos_(hWnd, 0, windowDimension\x, windowDimension\y, windowDimension\w, windowDimension\h, #SWP_NOZORDER | #SWP_NOACTIVATE)
+    SendMessage_(hWnd, #WM_SETICON, #ICON_SMALL, appIcon)
+    SendMessage_(hWnd, #WM_SETICON, #ICON_BIG, appIcon)
   CompilerEndIf
   
   WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
   
   WebViewGadget(0, -10, -10, WindowWidth(0)+20, WindowHeight(0)+20,#PB_WebView_Debug)
-  
-  
-  
   SetGadgetText(0, url)
-  
-  
-  
-  
-  SetWebViewStyle()
-  
+  InjectWebViewCustomJS()
   WebViewExecuteScript(0, ~"document.addEventListener('DOMContentLoaded', () => {callbackReadyState()});")
   BindWebViewCallback(0, "callbackReadyState", @CallbackReadyState())
+  
   ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
-  
   HideGadget(0, #True)
-  
-  
-  
   
   Repeat : Delay(1) : Until WindowEvent() = 0
   ShowWindowFadeIn(0)
@@ -1110,132 +1026,119 @@ Procedure OpenMainWindow()
 EndProcedure
 
 Procedure HideMainWindow()
-  If Not IsWindow(0) : ProcedureReturn : EndIf
-  
-  SaveCurrentGeometry()
-  ; HideWindow(0, #True)
-  ShowWindow_(WindowID(0), #SW_HIDE)
+  If  IsWindow(0) 
+    SaveCurrentWindowDimensions()
+    HideWindow(0, #True)
+  EndIf
 EndProcedure
 
 Procedure ShowMainWindow()
   If  IsWindow(0)
-    ;HideWindow(0, #False)
-    ShowWindow_(WindowID(0), #SW_SHOWNOACTIVATE) ; NOACTIVE AVOID FLICKER
+    CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+      ShowWindow_(WindowID(0), #SW_SHOWNOACTIVATE) ; #SW_SHOWNOACTIVATE to avoid flicker, BringWindowToFront -> active
+    CompilerElse
+      HideWindow(0,#False)
+    CompilerEndIf
     SetWindowState(0, #PB_Window_Normal)
     BringWindowToFront(0)
     StickyWindow(0,#True)
     SetActiveWindow(0)
   EndIf
-  
 EndProcedure
 
 ;=====================================================================
-;-  Main Loop
+;-  Callback to trach URL Location change and handle it
 ;=====================================================================
 
-OpenMainWindow()
-
-CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  CreateTrayIcon()
-  BuildTrayMenu()
-CompilerEndIf
-
-start = ElapsedMilliseconds()
-
-executeScript = ElapsedMilliseconds()
-
-
-Procedure CallbackLocation(JsonParameters$)
+Procedure CallbackLocation(jsonParameters.s)
   Dim Parameters.s(0)
-  ParseJSON(0, JsonParameters$)
+  ParseJSON(0, jsonParameters)
   ExtractJSONArray(JSONValue(0), Parameters())
   location.s = Parameters(0)
   If FindString(location,"login",1,  #PB_String_NoCase)
     WindowBounds(0, 660, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
     WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
-  EndIf 
+  EndIf   
   ProcedureReturn UTF8(~"")
 EndProcedure 
 
 
-Repeat
-  If Not webviewVisible And ElapsedMilliseconds() - start > 1500
-    webviewVisible = #True
-    HideGadget(0, #False)
+;=====================================================================
+;-  Main Loop
+;=====================================================================
+
+Procedure MainLoop()
+
+  
+  startTime= ElapsedMilliseconds()
+  executeScriptTime = ElapsedMilliseconds()
+  
+  Repeat
     
-  EndIf 
-  
-  If start <> 0 And ElapsedMilliseconds() - start > 3000
-    HideGadget(0, #False)
-  EndIf 
-  
-  
-  If ElapsedMilliseconds() - executeScript > 1500
-    SetWebViewStyle()
-    executeScript = ElapsedMilliseconds()
-    BindWebViewCallback(0, "callbackLocation", @CallbackLocation())
-    WebViewExecuteScript(0, ~"callbackLocation(document.location.href);")
+    If Not webviewVisible And ElapsedMilliseconds() - startTime > 1500
+      webviewVisible = #True
+      HideGadget(0, #False) 
+    EndIf 
     
-  EndIf 
-  
-  windowEvent = WaitWindowEvent()
-  
-  
-  CompilerSelect #PB_Compiler_OS
-    CompilerCase #PB_OS_Windows
-      Select windowEvent
-        Case #PB_Event_SysTray
-          ShowMainWindow()
-        Case #PB_Event_Gadget
-          Debug "GADGET"
-        Case #PB_Event_Menu
-          Select EventMenu()
-            Case MenuOpenID
-              ShowMainWindow()
-            Case MenuExitID
-                SaveCurrentGeometry()
-              
-              RemoveTrayIcon()
-              End
-          EndSelect
-        Case #PB_Event_SizeWindow, #PB_Event_MoveWindow
-          If IsWindow(0)
-            ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
-              SaveCurrentGeometry()
-               
-          EndIf
-          
-        Case #PB_Event_CloseWindow
-          HideMainWindow()
-      EndSelect
-      
-      
-  CompilerEndSelect
-ForEver
+    If ElapsedMilliseconds() - executeScriptTime > 2000
+      executeScriptTime = ElapsedMilliseconds() 
+      InjectWebViewCustomJS()
+      executeScript = ElapsedMilliseconds()
+      BindWebViewCallback(0, "callbackLocation", @CallbackLocation())      
+      WebViewExecuteScript(0, ~"callbackLocation(document.location.href);")
+    EndIf 
+    
+    windowEvent = WaitWindowEvent()
+    CompilerSelect #PB_Compiler_OS
+      CompilerCase #PB_OS_Windows
+        Select windowEvent
+          Case #PB_Event_SysTray
+            ShowMainWindow()
+          Case #PB_Event_Menu
+            Select EventMenu()
+              Case menuOpenID
+                ShowMainWindow()
+              Case menuExitID
+                SaveCurrentWindowDimensions()
+                RemoveTrayIcon()
+                End
+            EndSelect
+          Case #PB_Event_SizeWindow, #PB_Event_MoveWindow
+            If IsWindow(0)
+              ResizeGadget(0,0,0,WindowWidth(0), WindowHeight(0))
+              SaveCurrentWindowDimensions() 
+            EndIf
+          Case #PB_Event_CloseWindow
+            HideMainWindow()
+          ;Case #PB_Event_Gadget
+        EndSelect
+    CompilerEndSelect
+  ForEver
+EndProcedure 
 
 ;=====================================================================
 ;-  Cleanup
 ;=====================================================================
 
-CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-  RemoveKeyboardHook()
-  
-  If themeBgBrush
-    DeleteObject_(themeBgBrush)
-  EndIf 
-  If AppIcon
-    DestroyIcon_(AppIcon)
-  EndIf 
-  If MutexHandle
-    CloseHandle_(MutexHandle)
-  EndIf
-CompilerEndIf
-End
-
+Procedure CleanUp()
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    
+    RemoveKeyboardHook()
+    If themeBgBrush
+      DeleteObject_(themeBgBrush)
+    EndIf 
+    If appIcon
+      DestroyIcon_(appIcon)
+    EndIf 
+    If MutexHandle
+      CloseHandle_(MutexHandle)
+    EndIf 
+  CompilerEndIf
+EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 401
-; FirstLine = 369
+; CursorPosition = 733
+; FirstLine = 728
 ; Folding = -----------
 ; Optimizer
 ; EnableThread
