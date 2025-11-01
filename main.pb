@@ -15,7 +15,7 @@ Declare.s EscapeHostForFileName(url.s)
 Declare GetAppIcon()
 Declare ErrorHandler()
 Declare IsDarkModeActive()
-Declare LoadCurrentWindowDimension()
+Declare LoadUserData()
 Declare SetStaticWebviewGadgetJSSnippets()
 Declare CreateTrayIcon()
 Declare BuildTrayMenu()
@@ -42,7 +42,7 @@ EndStructure
 
 Global host.s = GetHostName(url.s)
 Global safeHost.s = EscapeHostForFileName(LCase(host))
-Global appTemp.s  = GetTemporaryDirectory() + "MyWebViewApp\"
+Global appTemp.s  = GetTemporaryDirectory() + name+"\"
 Global jsonPath.s = appTemp + safeHost + "-settings.json"
 Global appIcon = GetAppIcon()
 Global isDarkModeActiveCached = IsDarkModeActive()
@@ -53,10 +53,12 @@ Global trayIconID = 1
 Global menuOpenID = 100
 Global menuSettingsID = 101
 Global menuExitID = 102
-
+Global logginIn.b = #False
+Global location.s
+Global beforeLoginWindowWidth = 0
 Global NewMap StaticControlThemeProcs()
 Global themeBgBrush
-
+Debug jsonPath
 CreateDirectory(appTemp)
 
 OnErrorCall(@ErrorHandler()) ; comment out if not needed 
@@ -114,10 +116,10 @@ Global CurrentShortcut.ShortcutConfig
 
 
 SetStaticWebviewGadgetJSSnippets()
-
-LoadCurrentWindowDimension()
-OpenMainWindow()
 CreateSettingsWindow()
+
+LoadUserData()
+OpenMainWindow()
 CreateTrayIcon()
 BuildTrayMenu()
 
@@ -522,11 +524,9 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Protected className.s = Space(256)
     
     Protected length = GetClassName_(hWnd, @className, 256)
-    Debug "ApplyThemeToWindowChildren"
     
     If length > 0
       className = LCase(PeekS(@className))
-      Debug className
       
       Select className
           
@@ -573,7 +573,6 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   EndProcedure
   
   Procedure ApplyThemeToWinHandle(hWnd)
-    Debug "ApplyThemeToWinHandle"
     Protected bg, fg
     If isDarkModeActiveCached
       bg = RGB(10,10,10)
@@ -582,11 +581,8 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
       bg = RGB(255, 255, 255)
       fg = RGB(0, 0, 0)
     EndIf 
-    SetWindowColor(0, bg)
     SetDarkTitleBar(hWnd, isDarkModeActiveCached)
-    Debug hWnd
-    Debug @ApplyThemeToWindowChildren()
-    Debug EnumChildWindows_(hWnd, @ApplyThemeToWindowChildren(), 0)
+    EnumChildWindows_(hWnd, @ApplyThemeToWindowChildren(), 0)
   EndProcedure
 CompilerEndIf
 
@@ -596,7 +592,7 @@ CompilerEndIf
 ;=====================================================================
 
 Procedure InjectWebViewCustomJS()
-  If IsGadget(0)
+  If  Not FindString(location,"login",1,  #PB_String_NoCase) And IsGadget(0) 
     WebViewExecuteScript(0, SetWebviewStyleJS())
     WebViewExecuteScript(0, disableAutomaticScrollJS) ;Disable autoscroll (auto), allow manual scrolling (smooth)
     WebViewExecuteScript(0, disableUnnecessaryScrollbar)
@@ -740,7 +736,9 @@ CompilerEndIf
 ;-  JSON Geometry Load / Save
 ;=====================================================================
 
-Procedure LoadGeometryFromJSON(path.s, *geom.WindowDimension)
+
+
+Procedure LoadUserDataFromJSON(path.s, *geom.WindowDimension)
   If FileSize(path) <= 0
     ProcedureReturn #False
   EndIf
@@ -765,11 +763,18 @@ Procedure LoadGeometryFromJSON(path.s, *geom.WindowDimension)
   member = GetJSONMember(root, "desk_w")  : If member : *geom\desk_w = GetJSONInteger(member) : EndIf
   member = GetJSONMember(root, "desk_h")  : If member : *geom\desk_h = GetJSONInteger(member) : EndIf
   
+  ; Load shortcut configuration
+  member = GetJSONMember(root, "shortcut_key1") : If member : CurrentShortcut\Key1 = GetJSONInteger(member) : EndIf
+  member = GetJSONMember(root, "shortcut_key2") : If member : CurrentShortcut\Key2 = GetJSONInteger(member) : EndIf
+  member = GetJSONMember(root, "shortcut_key3") : If member : CurrentShortcut\Key3 = GetJSONInteger(member) : EndIf
+  member = GetJSONMember(root, "shortcut_key4") : If member : CurrentShortcut\Key4 = GetJSONInteger(member) : EndIf
+  member = GetJSONMember(root, "shortcut_display") : If member : CurrentShortcut\DisplayText = GetJSONString(member) : EndIf
+  
   FreeJSON(json)
   ProcedureReturn #True
 EndProcedure
 
-Procedure SaveGeometryToJSON(path.s, *geom.WindowDimension)
+Procedure SaveUserDataToJSON(path.s, *geom.WindowDimension)
   Protected json = CreateJSON(#PB_Any, #PB_JSON_NoCase)
   If Not json
     ProcedureReturn #False
@@ -784,7 +789,12 @@ Procedure SaveGeometryToJSON(path.s, *geom.WindowDimension)
   SetJSONInteger(AddJSONMember(root, "desktop"), *geom\desktop)
   SetJSONInteger(AddJSONMember(root, "desk_w"), *geom\desk_w)
   SetJSONInteger(AddJSONMember(root, "desk_h"), *geom\desk_h)
-  
+    ; Save shortcut configuration
+  SetJSONInteger(AddJSONMember(root, "shortcut_key1"), CurrentShortcut\Key1)
+  SetJSONInteger(AddJSONMember(root, "shortcut_key2"), CurrentShortcut\Key2)
+  SetJSONInteger(AddJSONMember(root, "shortcut_key3"), CurrentShortcut\Key3)
+  SetJSONInteger(AddJSONMember(root, "shortcut_key4"), CurrentShortcut\Key4)
+  SetJSONString(AddJSONMember(root, "shortcut_display"), CurrentShortcut\DisplayText)
   Protected result = SaveJSON(json, path, #PB_JSON_PrettyPrint)
   FreeJSON(json)
   ProcedureReturn result
@@ -794,7 +804,7 @@ EndProcedure
 ;-  Geometry Management
 ;=====================================================================
 
-Procedure SaveCurrentWindowDimensions()
+Procedure SaveUserData()
   If Not IsWindow(0) : ProcedureReturn : EndIf
   If  IsZoomed_(WindowID(0)) Or IsIconic_(WindowID(0))
     ProcedureReturn
@@ -823,13 +833,13 @@ Procedure SaveCurrentWindowDimensions()
     saveGeom\desk_h = 0
   CompilerEndIf
   
-  SaveGeometryToJSON(jsonPath, @saveGeom)
+  SaveUserDataToJSON(jsonPath, @saveGeom)
 EndProcedure
 
 ;=====================================================================
 ;-  Load & Validate Saved Geometry
 ;=====================================================================
-Procedure LoadCurrentWindowDimension()
+Procedure LoadUserData()
   numberDesktops = ExamineDesktops()
   
   windowDimension\w = 800
@@ -841,7 +851,7 @@ Procedure LoadCurrentWindowDimension()
   windowDimension\desk_h = 0
   valid = #False
   
-  If LoadGeometryFromJSON(jsonPath, @windowDimension)    
+  If LoadUserDataFromJSON(jsonPath, @windowDimension)    
     If windowDimension\x <> #PB_Ignore And windowDimension\y <> #PB_Ignore And windowDimension\w >= #Min_Window_Width And windowDimension\h >= #Min_Window_Height
       CompilerIf #PB_Compiler_OS = #PB_OS_Windows
         If windowDimension\desktop >= 0 And windowDimension\desktop < numberDesktops
@@ -1168,7 +1178,7 @@ Procedure WindowCallback(hwnd, msg, wParam, lParam)
       If lParam
         themeName.s = PeekS(lParam)
         If themeName = "ImmersiveColorSet"
-          IsDarkModeActive()
+          isDarkModeActiveCached = IsDarkModeActive()
           ApplyThemeToWinHandle(hwnd)
           InvalidateRect_(hwnd, #Null, #True)
         EndIf
@@ -1297,7 +1307,7 @@ EndProcedure
 
 Procedure HideMainWindow()
   If  IsWindow(0) 
-    SaveCurrentWindowDimensions()
+    SaveUserData()
     HideWindow(0, #True)
   EndIf
 EndProcedure
@@ -1325,9 +1335,23 @@ Procedure CallbackLocation(jsonParameters.s)
   ParseJSON(0, jsonParameters)
   ExtractJSONArray(JSONValue(0), Parameters())
   location.s = Parameters(0)
-  If FindString(location,"login",1,  #PB_String_NoCase)
-    WindowBounds(0, 660, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
-    WindowBounds(0, #Min_Window_Width, #Min_Window_Height, #PB_Ignore, #PB_Ignore)
+  
+  ; Resize for Login and resize back
+  If Not logginIn 
+    If FindString(location,"login",1,  #PB_String_NoCase)
+      logginIn = #True
+      beforeLoginWindowWidth = WindowWidth(#WINDOW_MAIN)
+      If WindowWidth(#WINDOW_MAIN)< 660
+        wDifference = 660-WindowWidth(#WINDOW_MAIN)
+        ResizeWindow(#WINDOW_MAIN,WindowX(#WINDOW_MAIN)-wDifference/2,#PB_Ignore,660,#PB_Ignore)
+      EndIf 
+    EndIf
+  Else
+    If Not FindString(location,"login",1,  #PB_String_NoCase)
+      logginIn = #False 
+      wDifference = WindowWidth(#WINDOW_MAIN)-beforeLoginWindowWidth
+      ResizeWindow(#WINDOW_MAIN,WindowX(#WINDOW_MAIN)+wDifference/2,#PB_Ignore,beforeLoginWindowWidth,#PB_Ignore)
+    EndIf   
   EndIf   
   ProcedureReturn UTF8(~"")
 EndProcedure 
@@ -1450,7 +1474,7 @@ Procedure FinalizeCapture()
   
   ; Validate the combination (at least 2 keys)
   If ListSize(CapturedVKs()) < 2
-    CapturedKeys = "Invalid - need at least 2 keys"
+    CapturedKeys = "Invalid - at least 2 keys"
     ClearList(CapturedVKs())
     SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
   EndIf
@@ -1580,7 +1604,7 @@ Procedure CreateSettingsWindow()
   If CurrentShortcut\DisplayText = ""
     CurrentShortcut\Key1 = #VK_LCONTROL
     CurrentShortcut\Key2 = #VK_SPACE
-    CurrentShortcut\DisplayText = "Ctrl+Win"
+    CurrentShortcut\DisplayText = "Ctrl+Space"
   EndIf
   
   If OpenWindow(#WINDOW_SETTINGS, 0, 0, 400, 135, "Settings", 
@@ -1597,7 +1621,7 @@ Procedure CreateSettingsWindow()
     ; Display current shortcut - Remove #PB_String_ReadOnly to allow clicking
     StringGadget(#STRING_SHORTCUT_DISPLAY, 150, 17, 150, 25, 
                  CurrentShortcut\DisplayText)
-    
+
     ; Capture button
     ButtonGadget(#BTN_CAPTURE, 310, 17, 70, 25, "Change")
     
@@ -1620,16 +1644,38 @@ EndProcedure
 ;=====================================================================
 ;-  Main Loop
 ;=====================================================================
+
+Procedure HideCaretHandler()
+  Static lastFocus = #False
+  If GetFocus_() = GadgetID(#STRING_SHORTCUT_DISPLAY)
+    If Not lastFocus
+      HideCaret_(GadgetID(#STRING_SHORTCUT_DISPLAY))
+      lastFocus = #True
+    EndIf
+  Else
+    lastFocus = #False
+  EndIf
+EndProcedure
+
+
+
 Procedure MainLoop()
   
   startTime = ElapsedMilliseconds()
   executeScriptTime = ElapsedMilliseconds()
-  
+  SetWindowTitle(#WINDOW_MAIN,name+" - "+CurrentShortcut\DisplayText)
+  resetTitle = #False 
   Repeat
     
     If Not webviewVisible And ElapsedMilliseconds() - startTime > 1500
       webviewVisible = #True
       HideGadget(0, #False) 
+    EndIf 
+
+    
+    If Not resetTitle And ElapsedMilliseconds() - startTime > 60000
+      resetTitle = #True
+      SetWindowTitle(#WINDOW_MAIN,name)
     EndIf 
     
     ; Don't inject JS or do webview operations when settings window is open!
@@ -1649,9 +1695,7 @@ Procedure MainLoop()
     
     windowEvent = WaitWindowEvent(10) ; Add timeout so it doesn't block
     currentWindow = EventWindow()
-    
-    Debug "Event: " + Str(windowEvent) + " Window: " + Str(currentWindow) + " Gadget: " + Str(EventGadget())
-    
+        
     Select currentWindow
       Case #WINDOW_MAIN
         Select windowEvent
@@ -1697,7 +1741,7 @@ Procedure MainLoop()
                 AddWindowTimer(#WINDOW_SETTINGS, 1, 50)
                 
               Case menuExitID
-                SaveCurrentWindowDimensions()
+                SaveUserData()
                 RemoveTrayIcon()
                 End
             EndSelect
@@ -1705,7 +1749,7 @@ Procedure MainLoop()
           Case #PB_Event_SizeWindow, #PB_Event_MoveWindow
             If IsWindow(#WINDOW_MAIN)
               ResizeGadget(0, 0, 0, WindowWidth(#WINDOW_MAIN), WindowHeight(#WINDOW_MAIN))
-              SaveCurrentWindowDimensions() 
+              SaveUserData() 
             EndIf
             
           Case #PB_Event_CloseWindow
@@ -1713,23 +1757,19 @@ Procedure MainLoop()
         EndSelect
         
       Case #WINDOW_SETTINGS
-        Debug "==> SETTINGS EVENT TYPE: " + Str(windowEvent)
-        
+         HideCaretHandler()
         Protected closedSettings = #False
         
         Select windowEvent
           Case #PB_Event_Timer
-            Debug "Timer event"
             If EventTimer() = 1
               CheckCaptureTimeout()
             EndIf
             
           Case #PB_Event_Gadget
-            Debug "==> GADGET EVENT: " + Str(EventGadget()) + " Type: " + Str(EventType())
             
             Select EventGadget()
               Case #STRING_SHORTCUT_DISPLAY
-                Debug "String gadget clicked"
                 If EventType() = #PB_EventType_Focus
                   If Not IsCapturing
                     StartCapture()
@@ -1737,7 +1777,6 @@ Procedure MainLoop()
                 EndIf
                 
               Case #BTN_CAPTURE
-                Debug "Capture button clicked"
                 If Not IsCapturing
                   StartCapture()
                 Else
@@ -1750,13 +1789,11 @@ Procedure MainLoop()
                 EndIf
                 
               Case #BTN_OK
-                Debug "OK button clicked"
                 StopCapture()
                 
                 If ListSize(CapturedVKs()) > 0
                   If ValidateShortcut()
                     SaveShortcut()
-                    Debug "Shortcut saved: " + CurrentShortcut\DisplayText
                   Else
                     MessageRequester("Error", "Please capture a valid shortcut (at least 2 keys) or click Cancel.", 
                                      #PB_MessageRequester_Error)
@@ -1767,20 +1804,17 @@ Procedure MainLoop()
                 closedSettings = #True 
                 
               Case #BTN_CANCEL
-                Debug "Cancel button clicked"
                 StopCapture()
                 closedSettings = #True 
                 
             EndSelect
             
           Case #PB_Event_CloseWindow
-            Debug "Settings window close event"
             StopCapture()
             closedSettings = #True
         EndSelect
         
         If closedSettings
-          Debug "Closing settings window"
           RemoveWindowTimer(#WINDOW_SETTINGS, 1)
           HideWindow(#WINDOW_SETTINGS, #True)
           
@@ -1817,8 +1851,8 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 1581
-; FirstLine = 1577
+; CursorPosition = 1180
+; FirstLine = 1160
 ; Folding = --------------
 ; Optimizer
 ; EnableThread
