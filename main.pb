@@ -179,7 +179,7 @@ Procedure SetStaticWebviewGadgetJSSnippets()
                                        ~"})();"
   
   
-  Global disableUnnecessaryScrollbar.s = ""+
+  Global disableUnnecessaryScrollbarJS.s = ""+
                                          ~"(() => {\n" +
                                          ~"  var el = document.getElementById('pb-start-style');\n" +
                                          ~"  if (el) el.remove();\n" +
@@ -595,7 +595,7 @@ Procedure InjectWebViewCustomJS()
   If  Not FindString(location,"login",1,  #PB_String_NoCase) And IsGadget(0) 
     WebViewExecuteScript(0, SetWebviewStyleJS())
     WebViewExecuteScript(0, disableAutomaticScrollJS) ;Disable autoscroll (auto), allow manual scrolling (smooth)
-    WebViewExecuteScript(0, disableUnnecessaryScrollbar)
+    WebViewExecuteScript(0, disableUnnecessaryScrollbarJS)
   EndIf
 EndProcedure
 
@@ -1851,8 +1851,8 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 1180
-; FirstLine = 1160
+; CursorPosition = 572
+; FirstLine = 559
 ; Folding = --------------
 ; Optimizer
 ; EnableThread
