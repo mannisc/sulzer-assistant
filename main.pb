@@ -382,17 +382,10 @@ EndProcedure
 
 Procedure EnsureSingleInstance()
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-    Global MutexHandle = CreateMutex_(#Null, #True, @"SulzerAssistantWebViewMutex")
+    mutexName.s = name+"WebViewMutex"
+    Global MutexHandle = CreateMutex_(#Null, #True, @mutexName)
     If GetLastError_() = #ERROR_ALREADY_EXISTS
-      ; Another instance is running → find its window and bring it to front
-      Debug name 
       hWnd = FindWindowPartial(name)
-      Debug "!!!!!!!!!"
-      Debug hWnd
-      If hWnd = 0
-        ; Fallback: try by title (less reliable, but safe)
-        hWnd = FindWindow_("pb_window_0", #Null)  ; PureBasic main window class
-      EndIf 
       If hWnd
         ShowWindow_(hWnd, #SW_RESTORE)
         BringWindowToFrontWinHandle(hWnd)
@@ -1894,14 +1887,10 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 388
-; FirstLine = 361
+; CursorPosition = 1887
+; FirstLine = 1855
 ; Folding = --------------
-; Optimizer
-; EnableThread
 ; EnableXP
 ; DPIAware
-; EnableOnError
 ; UseIcon = icon\icon.ico
 ; Executable = ..\Assistant.exe
-; Compiler = PureBasic 6.21 - C Backend (Windows - x64)
