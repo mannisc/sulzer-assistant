@@ -196,6 +196,21 @@ Procedure SetStaticWebviewGadgetJSSnippets()
                                            ~"  document.head.appendChild(style);\n" +
                                            ~"})();"
   
+  Global startNewChat.s =  "{" +
+                           ~"  const btn = document.querySelector('button[aria-label=\"New Chat\"]');" +
+                           "  if (btn) {" +
+                           "    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));" +
+                           "  }" +
+                           "  const input = document.querySelector('#chat-input');" +
+                           "  if (input) {" +
+                           "    input.innerHTML = '';" +
+                           "  }" +
+                           "}"
+  
+  Global sendChatMessage.s =  ~"document.getElementById('send-message-button').click();"
+  
+  
+  
 EndProcedure
 
 Procedure.s SetWebviewStyleJS()
@@ -972,10 +987,7 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
   
   ProcedureDLL.i KeyboardProc(nCode, wParam, lParam)
     
-    Static CombinationToggle_Count = 0
-    Static CombinationToggle_LastTime = 0
-    Static CombinationNew_Count = 0
-    Static CombinationNew_LastTime = 0
+    Static Dim PressedKeys(255)
     
     Protected foregroundHwnd = GetForegroundWindow_()
     
@@ -989,157 +1001,148 @@ CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     EndIf
     
     Protected vKey = PeekL(lParam) & $FF
-    Protected flags = PeekL(lParam + 8)
-    Protected isDown = Bool(Not (flags & $80000000))
-    Protected now = 0
+    Protected isDown = Bool(wParam = #WM_KEYDOWN Or wParam = #WM_SYSKEYDOWN)
     
+    
+    
+    
+    Protected isUp = #False 
+    If Not isDown And PressedKeys(vKey)
+      isUp = #True
+    EndIf 
+    
+ 
+      
     ; Track Shift state for Enter handling
     If vKey = #VK_LSHIFT Or vKey = #VK_RSHIFT
-      Shift_Down = 1 - Shift_Down
+      Shift_Down = isDown
       ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
     EndIf
     
-    ;=======================================================================
-    ; DYNAMIC TOGGLE SHORTCUT (from CurrentShortcut structure)
-    ;=======================================================================
-    
-    ; Check if current key is part of the configured shortcut
-    Protected isShortcutKey = #False
-    If vKey = CurrentShortcut\Key1 Or vKey = CurrentShortcut\Key2 Or 
-       vKey = CurrentShortcut\Key3 Or vKey = CurrentShortcut\Key4
-      isShortcutKey = #True
-    EndIf
-    
-    If isShortcutKey And isDown
-      ; Check if ALL configured shortcut keys are currently pressed
-      Protected allKeysPressed = #True
+      ;=======================================================================
+      ; DYNAMIC TOGGLE SHORTCUT (from CurrentShortcut structure)
+      ;=======================================================================
       
-      ; Check Key1 (always required)
-      If CurrentShortcut\Key1
-        If Not (GetAsyncKeyState_(CurrentShortcut\Key1) & $8000)
-          allKeysPressed = #False
-        EndIf
+      ; Check if current key is part of the configured shortcut
+      Protected isShortcutKey = #False
+      If vKey = CurrentShortcut\Key1 Or vKey = CurrentShortcut\Key2 Or 
+         vKey = CurrentShortcut\Key3 Or vKey = CurrentShortcut\Key4
+        isShortcutKey = #True
       EndIf
       
-      ; Check Key2 (always required)
-      If CurrentShortcut\Key2
-        If Not (GetAsyncKeyState_(CurrentShortcut\Key2) & $8000)
-          allKeysPressed = #False
-        EndIf
-      EndIf
+      Static allKeysPressed = #False
+
+      If isDown Or ( Not isShortcutKey And Not allKeysPressed)
+        PressedKeys(vKey) = isDown
+      EndIf 
       
-      ; Check Key3 (optional)
-      If CurrentShortcut\Key3
-        If Not (GetAsyncKeyState_(CurrentShortcut\Key3) & $8000)
-          allKeysPressed = #False
-        EndIf
-      EndIf
       
-      ; Check Key4 (optional)
-      If CurrentShortcut\Key4
-        If Not (GetAsyncKeyState_(CurrentShortcut\Key4) & $8000)
-          allKeysPressed = #False
+
+      If isShortcutKey 
+         
+        ; Check if ALL configured shortcut keys are currently pressed
+        Protected oldAllKeysPressed = allKeysPressed
+        allKeysPressed = #True
+        ; Check Key1 (always required)
+        If CurrentShortcut\Key1
+          If Not (GetAsyncKeyState_(CurrentShortcut\Key1) & $8000) And Not vKey = CurrentShortcut\Key1
+            allKeysPressed = #False
+          EndIf
         EndIf
-      EndIf
-      
-      ; If all keys are pressed, handle the toggle action
-      If allKeysPressed
-        now = ElapsedMilliseconds()
         
-        If CombinationToggle_LastTime = 0 Or now - CombinationToggle_LastTime < #DOUBLE_TAP_DELAY
-          CombinationToggle_Count + 1
+        ; Check Key2 (always required)
+        If CurrentShortcut\Key2
+          If Not (GetAsyncKeyState_(CurrentShortcut\Key2) & $8000) And Not vKey = CurrentShortcut\Key2
+            allKeysPressed = #False
+          EndIf
+        EndIf
+        
+        ; Check Key3 (optional)
+        If CurrentShortcut\Key3
+          If Not (GetAsyncKeyState_(CurrentShortcut\Key3) & $8000) And Not vKey = CurrentShortcut\Key3
+            allKeysPressed = #False
+          EndIf
+        EndIf
+        
+        ; Check Key4 (optional)
+        If CurrentShortcut\Key4
+          If Not (GetAsyncKeyState_(CurrentShortcut\Key4) & $8000) And Not vKey = CurrentShortcut\Key4
+            allKeysPressed = #False
+          EndIf
+        EndIf
+        If Not isDown
+           
+
+        ; If all keys are pressed, handle the toggle action
+        If allKeysPressed
+          allKeysPressed = #False
+          Protected extraKeyPressed = #False
           
-          If CombinationToggle_Count >= 1 ; Single press to toggle
+          ; Check for any other key pressed besides those in the shortcut
+          For key = 8 To 254
+            If PressedKeys(key)
+              ; Skip keys that are part of the shortcut
+              If (CurrentShortcut\Key1 <> 0 And key = CurrentShortcut\Key1) Or 
+                 (CurrentShortcut\Key2 <> 0 And key = CurrentShortcut\Key2) Or 
+                 (CurrentShortcut\Key3 <> 0 And key = CurrentShortcut\Key3) Or 
+                 (CurrentShortcut\Key4 <> 0 And key = CurrentShortcut\Key4)
+                Continue
+              EndIf
+              ; Any other key pressed = extra key
+              extraKeyPressed = #True
+              Break 
+            EndIf
+          Next
+          If Not extraKeyPressed
             If WindowID(0) = foregroundHwnd
               HideMainWindow()
             Else 
               ShowMainWindow()
               FocusInput()
             EndIf
-            
-            CombinationToggle_Count = 0
-            CombinationToggle_LastTime = 0
-          Else
-            CombinationToggle_LastTime = now
-          EndIf
-        Else
-          CombinationToggle_Count = 1
-          CombinationToggle_LastTime = now
+          EndIf 
         EndIf
       EndIf
-    Else
-      ; If a non-shortcut key is pressed or shortcut key released, reset counter
-      If Not isDown
-        ; Check if any of the shortcut keys are still pressed
-        Protected anyShortcutKeyPressed = #False
-        
-        If CurrentShortcut\Key1 And (GetAsyncKeyState_(CurrentShortcut\Key1) & $8000)
-          anyShortcutKeyPressed = #True
-        EndIf
-        If CurrentShortcut\Key2 And (GetAsyncKeyState_(CurrentShortcut\Key2) & $8000)
-          anyShortcutKeyPressed = #True
-        EndIf
-        If CurrentShortcut\Key3 And (GetAsyncKeyState_(CurrentShortcut\Key3) & $8000)
-          anyShortcutKeyPressed = #True
-        EndIf
-        If CurrentShortcut\Key4 And (GetAsyncKeyState_(CurrentShortcut\Key4) & $8000)
-          anyShortcutKeyPressed = #True
-        EndIf
-        
-        If Not anyShortcutKeyPressed
-          CombinationToggle_Count = 0
-        EndIf
-      EndIf
+      
+      If oldAllKeysPressed And Not allKeysPressed
+        For key = 8 To 254
+        PressedKeys(key) = 0
+          Next 
+      EndIf 
     EndIf
     
-    ;=======================================================================
-    ; CTRL+N for New Chat
-    ;=======================================================================
+      ; set to false only after combination, so combinations pressed in between still there
+
+
+      If isUp
     
-    If vKey = #VK_LCONTROL Or vKey = #VK_N
-      If isDown
-        If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_N) & $8000
-          now = ElapsedMilliseconds()
+        If Not allKeysPressed
+          ;=======================================================================
+          ; CTRL+N for New Chat
+          ;=======================================================================
           
-          If CombinationNew_LastTime = 0 Or now - CombinationNew_LastTime < #DOUBLE_TAP_DELAY
-            CombinationNew_Count + 1
-            
-            If CombinationNew_Count >= 1
+          If vKey = #VK_LCONTROL Or vKey = #VK_RCONTROL Or vKey = #VK_N
+            If GetAsyncKeyState_(#VK_CONTROL) & $8000 And GetAsyncKeyState_(#VK_N) & $8000
               If WindowID(0) = foregroundHwnd
-                WebViewExecuteScript(0, ~"document.querySelector('button[aria-label=\"New Chat\"]').click();")
-              EndIf 
-              
-              CombinationNew_Count = 0
-              CombinationNew_LastTime = 0
-            Else
-              CombinationNew_LastTime = now
+                WebViewExecuteScript(0, startNewChat )  
+              EndIf   
             EndIf
-          Else
-            CombinationNew_Count = 1
-            CombinationNew_LastTime = now
+            ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
+          EndIf
+          
+          ;=======================================================================
+          ; ENTER to Send Message (without Shift)
+          ;=======================================================================
+          
+          If vKey = #VK_RETURN 
+            If Not Shift_Down  And  GetActiveWindow_() = WindowID(0) And foregroundHwnd = WindowID(0)
+            WebViewExecuteScript(0, sendChatMessage)
+            keybd_event_(#VK_BACK, 0, 0, 0)
+            keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0)
           EndIf
         EndIf
-      Else
-        If Not (GetAsyncKeyState_(#VK_CONTROL) & $8000) Or Not (GetAsyncKeyState_(#VK_N) & $8000)
-          CombinationNew_Count = 0
         EndIf
-      EndIf
-      
-      ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
-    EndIf
-    
-    ;=======================================================================
-    ; ENTER to Send Message (without Shift)
-    ;=======================================================================
-    
-    If vKey = #VK_RETURN And Not Shift_Down And isDown And 
-       GetActiveWindow_() = WindowID(0) And foregroundHwnd = WindowID(0)
-      
-      WebViewExecuteScript(0, ~"document.getElementById('send-message-button').click();")
-      keybd_event_(#VK_BACK, 0, 0, 0)
-      keybd_event_(#VK_BACK, 0, #KEYEVENTF_KEYUP, 0)
-    EndIf
-    
+    EndIf 
     ProcedureReturn CallNextHookEx_(0, nCode, wParam, lParam)
   EndProcedure
   
@@ -1389,7 +1392,6 @@ EndProcedure
 ;-  Settings Window Control Procedures
 ;=====================================================================
 
-
 Procedure.s GetKeyName(vKey)
   ; Convert virtual key code to display name
   Select vKey
@@ -1413,6 +1415,8 @@ Procedure.s GetKeyName(vKey)
       ProcedureReturn "Tab"
     Case $08
       ProcedureReturn "Backspace"
+    Case $0D
+      ProcedureReturn "Enter"
     Case $2E
       ProcedureReturn "Delete"
     Case $24
@@ -1435,6 +1439,7 @@ Procedure.s GetKeyName(vKey)
       ProcedureReturn "Key" + Str(vKey)
   EndSelect
 EndProcedure
+
 
 Procedure.i IsModifierKey(vKey)
   ; Check if the key is a modifier
@@ -1473,6 +1478,9 @@ Procedure ShowWarning(CapturedKeys.s)
     Case "Win+R"
       SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Opens the Run dialog")
       
+    Case "Win+Space"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Win+Space switches input languages")
+
     Case "Win+Tab"
       SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Opens Task View (virtual desktops)")
       
@@ -1736,9 +1744,9 @@ EndProcedure
 Procedure CreateSettingsWindow()
   ; Initialize default shortcut (Ctrl+Win)
   If CurrentShortcut\DisplayText = ""
-    CurrentShortcut\Key1 = #VK_LWIN
-    CurrentShortcut\Key2 = #VK_SPACE
-    CurrentShortcut\DisplayText = "Win+Space"
+    CurrentShortcut\Key1 = #VK_LCONTROL
+    CurrentShortcut\Key2 = #VK_LWIN
+    CurrentShortcut\DisplayText = "Ctrl+Win"
   EndIf
   
   If OpenWindow(#WINDOW_SETTINGS, 0, 0, 400, 135, "Settings", 
@@ -1816,7 +1824,7 @@ EndProcedure
 Procedure HideSettingsWindow()   
   RemoveWindowTimer(#WINDOW_SETTINGS, 1)
   HideWindow(#WINDOW_SETTINGS, #True)
-  
+  SetWindowTitle(#WINDOW_MAIN,name)
   ; Re-install keyboard hook after settings closes!
   InstallKeyboardHook()
   
@@ -1992,12 +2000,11 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 1537
-; FirstLine = 1505
+; CursorPosition = 1138
+; FirstLine = 1134
 ; Folding = ---------------
 ; Optimizer
 ; EnableThread
-; EnableXP
 ; DPIAware
 ; UseIcon = icon\icon.ico
 ; Executable = ..\Assistant.exe
