@@ -58,7 +58,9 @@ Global location.s
 Global beforeLoginWindowWidth = 0
 Global NewMap StaticControlThemeProcs()
 Global themeBgBrush
+
 Debug jsonPath
+
 CreateDirectory(appTemp)
 
 OnErrorCall(@ErrorHandler()) ; comment out if not needed 
@@ -74,6 +76,7 @@ OnErrorCall(@ErrorHandler()) ; comment out if not needed
 Enumeration
   #WINDOW_SETTINGS = 100
   #TEXT_SHORTCUT_LABEL
+  #TEXT_SHORTCUT_HINT
   #STRING_SHORTCUT_DISPLAY
   #BTN_CAPTURE
   #BTN_OK
@@ -91,8 +94,8 @@ EndEnumeration
 #VK_RWIN = $5C
 
 ; Capture settings
-#CAPTURE_WAIT_TIME = 800  ; Wait 800ms after last key press before finalizing
-#MAX_KEYS = 4             ; Maximum number of keys in combination
+#CAPTURE_WAIT_TIME = 500  ; Wait 500ms after last key press before finalizing
+#MAX_KEYS = 5             ; Maximum number of keys in combination
 
 ; Global variables for shortcut configuration
 Global SettingsHook = 0
@@ -116,9 +119,9 @@ Global CurrentShortcut.ShortcutConfig
 
 
 SetStaticWebviewGadgetJSSnippets()
-CreateSettingsWindow()
-
 LoadUserData()
+
+CreateSettingsWindow()
 OpenMainWindow()
 CreateTrayIcon()
 BuildTrayMenu()
@@ -180,18 +183,18 @@ Procedure SetStaticWebviewGadgetJSSnippets()
   
   
   Global disableUnnecessaryScrollbarJS.s = ""+
-                                         ~"(() => {\n" +
-                                         ~"  var el = document.getElementById('pb-start-style');\n" +
-                                         ~"  if (el) el.remove();\n" +
-                                         ~"  const style = document.createElement('style');\n" +
-                                         ~"  style.id = 'pb-start-style';\n" +
-                                         ~"  style.textContent = `\n" +
-                                         ~"    .m-auto.w-full.max-w-6xl.px-2.translate-y-6.py-24.text-center {\n" +
-                                         ~"     padding-block: 0 !important;\n" +
-                                         ~"  }\n" +
-                                         ~"`\n" +
-                                         ~"  document.head.appendChild(style);\n" +
-                                         ~"})();"
+                                           ~"(() => {\n" +
+                                           ~"  var el = document.getElementById('pb-start-style');\n" +
+                                           ~"  if (el) el.remove();\n" +
+                                           ~"  const style = document.createElement('style');\n" +
+                                           ~"  style.id = 'pb-start-style';\n" +
+                                           ~"  style.textContent = `\n" +
+                                           ~"    .m-auto.w-full.max-w-6xl.px-2.translate-y-6.py-24.text-center {\n" +
+                                           ~"     padding-block: 0 !important;\n" +
+                                           ~"  }\n" +
+                                           ~"`\n" +
+                                           ~"  document.head.appendChild(style);\n" +
+                                           ~"})();"
   
 EndProcedure
 
@@ -357,13 +360,13 @@ EndProcedure
 Procedure EnumWindowsCallback(hWnd, lParam)
   Protected title.s = Space(255)
   GetWindowText_(hWnd, @title, 255)
-
+  
   ; Case-insensitive substring search
   If FindString(title, PeekS(lParam), 1, #PB_String_NoCase)
     PokeI(lParam - SizeOf(Integer), hWnd) ; store handle before string
-    ProcedureReturn #False ; stop enumeration (found one)
+    ProcedureReturn #False                ; stop enumeration (found one)
   EndIf
-
+  
   ProcedureReturn #True ; continue
 EndProcedure
 
@@ -652,7 +655,7 @@ Procedure.s EscapeHostForFileName(url.s)
     EndIf
   Next
   
-  fullKey = "webwrapper-" + cleanHost
+  fullKey = "data-" + cleanHost
   
   If queryPos <= Len(url)
     Protected query.s = Mid(url, queryPos + 1)
@@ -687,7 +690,7 @@ Procedure.s EscapeHostForFileName(url.s)
     Wend
   EndIf
   
-  If fullKey = "webwrapper-" : fullKey = "webwrapper-default" : EndIf
+  If fullKey = "data-" : fullKey = "data-default" : EndIf
   ProcedureReturn fullKey
 EndProcedure
 
@@ -811,7 +814,7 @@ Procedure SaveUserDataToJSON(path.s, *geom.WindowDimension)
   SetJSONInteger(AddJSONMember(root, "desktop"), *geom\desktop)
   SetJSONInteger(AddJSONMember(root, "desk_w"), *geom\desk_w)
   SetJSONInteger(AddJSONMember(root, "desk_h"), *geom\desk_h)
-    ; Save shortcut configuration
+  ; Save shortcut configuration
   SetJSONInteger(AddJSONMember(root, "shortcut_key1"), CurrentShortcut\Key1)
   SetJSONInteger(AddJSONMember(root, "shortcut_key2"), CurrentShortcut\Key2)
   SetJSONInteger(AddJSONMember(root, "shortcut_key3"), CurrentShortcut\Key3)
@@ -828,9 +831,10 @@ EndProcedure
 
 Procedure SaveUserData()
   If Not IsWindow(0) : ProcedureReturn : EndIf
+  
   If  IsZoomed_(WindowID(0)) Or IsIconic_(WindowID(0))
     ProcedureReturn
-  EndIf 
+  EndIf
   
   Protected numberDesktops = ExamineDesktops()
   Protected saveGeom.WindowDimension
@@ -839,6 +843,7 @@ Procedure SaveUserData()
   saveGeom\y = DesktopScaledY(WindowY(0)) 
   saveGeom\w = DesktopScaledX(WindowWidth(0, #PB_Window_FrameCoordinate))
   saveGeom\h = DesktopScaledY(WindowHeight(0, #PB_Window_FrameCoordinate))
+  
   
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     saveGeom\desktop = FindCurrentDesktop(saveGeom\x, saveGeom\y, saveGeom\w, saveGeom\h)
@@ -1442,6 +1447,95 @@ Procedure.i IsModifierKey(vKey)
   EndSelect
 EndProcedure
 
+Procedure ShowWarning(CapturedKeys.s)
+  Select CapturedKeys
+    Case "Ctrl+Space"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+Space is used for voice call unmute or input language")
+      
+    Case "Alt+Tab"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Not available: Alt+Tab is reserved for window switching")
+      
+    Case "Alt+F4"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Not available: Alt+F4 closes the active window")
+      
+    Case "Ctrl+Alt+Del"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Not available: Ctrl+Alt+Del opens the Security screen")
+      
+    Case "Win+L"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Not available: Win+L locks the PC")
+      
+    Case "Win+D"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Used by Windows to show the desktop")
+      
+    Case "Win+E"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Used to open File Explorer")
+      
+    Case "Win+R"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Opens the Run dialog")
+      
+    Case "Win+Tab"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Opens Task View (virtual desktops)")
+      
+    Case "Ctrl+Shift+Esc"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Opens Task Manager")
+      
+    Case "Ctrl+Alt+ArrowUp", "Ctrl+Alt+ArrowDown", "Ctrl+Alt+ArrowLeft", "Ctrl+Alt+ArrowRight"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Used by Intel Graphics drivers to rotate the screen")
+      
+    Case "Ctrl+Alt+S"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Used by some apps to capture shortcuts")
+      
+    Case "Ctrl+Shift+N"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Used by File Explorer and browsers to create new folders/incognito windows")
+      
+    Case "Alt+Esc"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Switches between windows without Alt+Tab menu")
+
+    ; --- Typical Windows & App shortcuts ---
+    Case "Ctrl+C"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+C is used to copy text or files")
+      
+    Case "Ctrl+V"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+V is used to paste text or files")
+      
+    Case "Ctrl+X"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+X is used to cut text or files")
+      
+    Case "Ctrl+Z"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+Z is used to undo actions")
+      
+    Case "Ctrl+Y"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+Y is used to redo actions")
+      
+    Case "Ctrl+A"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+A is used to select all text or items")
+      
+    Case "Ctrl+S"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+S is used to save documents")
+      
+    Case "Ctrl+O"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+O is used to open files")
+      
+    Case "Ctrl+P"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+P is used to print documents")
+      
+    Case "Ctrl+N"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+N is used to create a new document or window")
+      
+    Case "Ctrl+W"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Ctrl+W is used to close a document or tab")
+      
+    Case "Alt+F"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Alt+F opens the File menu in many applications")
+      
+    Case "Alt+Enter"
+      SetGadgetText(#TEXT_SHORTCUT_HINT, "Caution: Alt+Enter opens properties or toggles fullscreen in some apps")
+
+    Default
+      SetGadgetText(#TEXT_SHORTCUT_HINT, " ")
+  EndSelect
+EndProcedure
+
 Procedure UpdateCapturedKeysDisplay(counter)
   ; Build display string from captured keys
   CapturedKeys = ""
@@ -1479,10 +1573,13 @@ Procedure UpdateCapturedKeysDisplay(counter)
     CapturedKeys + GetKeyName(RegularKeys())
     first = #False
   Next
-  Debug "UpdateCapturedKeysDisplay"
   
-  SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+  OldCapturedKeys.s = GetGadgetText(#STRING_SHORTCUT_DISPLAY)
   
+  If OldCapturedKeys <> CapturedKeys
+    ShowWarning(CapturedKeys.s)
+    SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)  
+  EndIf
   
   counter+1
   If counter <20
@@ -1492,11 +1589,11 @@ Procedure UpdateCapturedKeysDisplay(counter)
 EndProcedure
 
 Procedure FinalizeCapture()
-;   If ListSize(CapturedVKs()) < 2
-;      CapturedKeys = "Invalid - at least 2 keys"
-;     ClearList(CapturedVKs())
-;     SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
-;   EndIf 
+  ;   If ListSize(CapturedVKs()) < 2
+  ;      CapturedKeys = "Invalid - at least 2 keys"
+  ;     ClearList(CapturedVKs())
+  ;     SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+  ;   EndIf 
   
   ; Stop capturing
   IsCapturing = #False
@@ -1510,12 +1607,12 @@ Procedure FinalizeCapture()
   
   ; Validate the combination (at least 2 keys)
   
-   
+  
   
   
   ; Remove focus from the input field so it can be clicked again
-    SetActiveGadget(#BTN_OK)
-    
+  SetActiveGadget(#BTN_OK)
+  
 EndProcedure
 
 ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
@@ -1526,14 +1623,10 @@ ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
   Protected vKey = PeekL(lParam) & $FF
   Protected flags = PeekL(lParam + 8)
   Protected isDown = Bool(Not (flags & $80000000))
-  Debug "SettingsKeyboardProc1"
   If IsCapturing
-      Debug "SettingsKeyboardProc2"
-
-      If isDown
-          Debug "SettingsKeyboardProc3"
-
-        
+    
+    If isDown
+      
       ; Key pressed down
       ; Check if we haven't exceeded max keys
       If ListSize(CapturedVKs()) >= #MAX_KEYS
@@ -1553,7 +1646,7 @@ ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
         AddElement(CapturedVKs())
         CapturedVKs() = vKey
       EndIf
-        
+      
       ; Update display
       CreateThread(@UpdateCapturedKeysDisplay(),0)
       
@@ -1643,9 +1736,9 @@ EndProcedure
 Procedure CreateSettingsWindow()
   ; Initialize default shortcut (Ctrl+Win)
   If CurrentShortcut\DisplayText = ""
-    CurrentShortcut\Key1 = #VK_LCONTROL
+    CurrentShortcut\Key1 = #VK_LWIN
     CurrentShortcut\Key2 = #VK_SPACE
-    CurrentShortcut\DisplayText = "Ctrl+Space"
+    CurrentShortcut\DisplayText = "Win+Space"
   EndIf
   
   If OpenWindow(#WINDOW_SETTINGS, 0, 0, 400, 135, "Settings", 
@@ -1656,13 +1749,17 @@ Procedure CreateSettingsWindow()
     
     SendMessage_(hWnd, #WM_SETICON, #ICON_SMALL, appIcon)
     SendMessage_(hWnd, #WM_SETICON, #ICON_BIG, appIcon)
+    
+    
     ; Keyboard shortcut label
     TextGadget(#TEXT_SHORTCUT_LABEL, 20, 16, 120, 25, "Keyboard shortcut:")
     
+    TextGadget(#TEXT_SHORTCUT_HINT, 20, 46, 360, 25, " ")
+    
+    
     ; Display current shortcut - Remove #PB_String_ReadOnly to allow clicking
-    StringGadget(#STRING_SHORTCUT_DISPLAY, 150, 17, 150, 25, 
-                 CurrentShortcut\DisplayText)
-
+    StringGadget(#STRING_SHORTCUT_DISPLAY, 150, 17, 150, 25, CurrentShortcut\DisplayText )
+    
     ; Capture button
     ButtonGadget(#BTN_CAPTURE, 310, 17, 70, 25, "Change")
     
@@ -1674,6 +1771,7 @@ Procedure CreateSettingsWindow()
     
     ; Add timer to check for capture timeout
     
+    ShowWarning(CurrentShortcut\DisplayText.s)
     
     ApplyThemeToWinHandle(WindowID(#WINDOW_SETTINGS))
     
@@ -1681,7 +1779,49 @@ Procedure CreateSettingsWindow()
   EndIf
 EndProcedure
 
+Procedure ShowSettingsWindow()
+  ; First hide main window
+  HideMainWindow()
+  
+  ; Temporarily unhook keyboard to prevent focus stealing!
+  RemoveKeyboardHook()
+  
+  ; Stop any capturing
+  If IsCapturing
+    StopCapture()
+  EndIf
+  
+  ; Reset display to current shortcut
+  If IsGadget(#STRING_SHORTCUT_DISPLAY)
+    SetGadgetText(#STRING_SHORTCUT_DISPLAY, CurrentShortcut\DisplayText)
+  EndIf
+  
+  ; Show settings window
+  CompilerIf #PB_Compiler_OS = #PB_OS_Windows
+    Protected settingsHwnd = WindowID(#WINDOW_SETTINGS)
+    
+    ShowWindow_(settingsHwnd, #SW_RESTORE)
+    UpdateWindow_(settingsHwnd)
+    SetForegroundWindow_(settingsHwnd)
+    BringWindowToTop_(settingsHwnd)
+    SetFocus_(settingsHwnd)
+  CompilerElse
+    HideWindow(#WINDOW_SETTINGS, #False)
+  CompilerEndIf
+  
+  ; Start timer AFTER showing
+  AddWindowTimer(#WINDOW_SETTINGS, 1, 50)
+EndProcedure
 
+Procedure HideSettingsWindow()   
+  RemoveWindowTimer(#WINDOW_SETTINGS, 1)
+  HideWindow(#WINDOW_SETTINGS, #True)
+  
+  ; Re-install keyboard hook after settings closes!
+  InstallKeyboardHook()
+  
+  ShowMainWindow()
+EndProcedure         
 ;=====================================================================
 ;-  Main Loop
 ;=====================================================================
@@ -1712,7 +1852,7 @@ Procedure MainLoop()
       webviewVisible = #True
       HideGadget(0, #False) 
     EndIf 
-
+    
     
     If Not resetTitle And ElapsedMilliseconds() - startTime > 60000
       resetTitle = #True
@@ -1736,7 +1876,7 @@ Procedure MainLoop()
     
     windowEvent = WaitWindowEvent(10) ; Add timeout so it doesn't block
     currentWindow = EventWindow()
-        
+    
     Select currentWindow
       Case #WINDOW_MAIN
         Select windowEvent
@@ -1749,37 +1889,7 @@ Procedure MainLoop()
                 ShowMainWindow()
                 
               Case menuSettingsID
-                ; First hide main window
-                HideMainWindow()
-                
-                ; CRITICAL: Temporarily unhook keyboard to prevent focus stealing!
-                RemoveKeyboardHook()
-                
-                ; Stop any capturing
-                If IsCapturing
-                  StopCapture()
-                EndIf
-                
-                ; Reset display to current shortcut
-                If IsGadget(#STRING_SHORTCUT_DISPLAY)
-                  SetGadgetText(#STRING_SHORTCUT_DISPLAY, CurrentShortcut\DisplayText)
-                EndIf
-                
-                ; Show settings window
-                CompilerIf #PB_Compiler_OS = #PB_OS_Windows
-                  Protected settingsHwnd = WindowID(#WINDOW_SETTINGS)
-                  
-                  ShowWindow_(settingsHwnd, #SW_RESTORE)
-                  UpdateWindow_(settingsHwnd)
-                  SetForegroundWindow_(settingsHwnd)
-                  BringWindowToTop_(settingsHwnd)
-                  SetFocus_(settingsHwnd)
-                CompilerElse
-                  HideWindow(#WINDOW_SETTINGS, #False)
-                CompilerEndIf
-                
-                ; Start timer AFTER showing
-                AddWindowTimer(#WINDOW_SETTINGS, 1, 50)
+                ShowSettingsWindow()
                 
               Case menuExitID
                 SaveUserData()
@@ -1798,7 +1908,7 @@ Procedure MainLoop()
         EndSelect
         
       Case #WINDOW_SETTINGS
-         HideCaretHandler()
+        HideCaretHandler()
         Protected closedSettings = #False
         
         Select windowEvent
@@ -1830,11 +1940,12 @@ Procedure MainLoop()
                 EndIf
                 
               Case #BTN_OK
+                
                 StopCapture()
                 
+                
                 If ListSize(CapturedVKs()) > 0
-                    SaveShortcut()
-                 
+                  SaveShortcut()    
                 EndIf
                 
                 closedSettings = #True 
@@ -1851,13 +1962,7 @@ Procedure MainLoop()
         EndSelect
         
         If closedSettings    
-          RemoveWindowTimer(#WINDOW_SETTINGS, 1)
-          HideWindow(#WINDOW_SETTINGS, #True)
-          
-          ; CRITICAL: Re-install keyboard hook after settings closes!
-          InstallKeyboardHook()
-          
-          ShowMainWindow()
+          HideSettingsWindow()
         EndIf
         
     EndSelect
@@ -1887,9 +1992,11 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 1887
-; FirstLine = 1855
-; Folding = --------------
+; CursorPosition = 1537
+; FirstLine = 1505
+; Folding = ---------------
+; Optimizer
+; EnableThread
 ; EnableXP
 ; DPIAware
 ; UseIcon = icon\icon.ico
