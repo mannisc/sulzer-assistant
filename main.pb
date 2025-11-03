@@ -354,12 +354,41 @@ EndProcedure
 ;-  Single Instance Check
 ;=====================================================================
 
+Procedure EnumWindowsCallback(hWnd, lParam)
+  Protected title.s = Space(255)
+  GetWindowText_(hWnd, @title, 255)
+
+  ; Case-insensitive substring search
+  If FindString(title, PeekS(lParam), 1, #PB_String_NoCase)
+    PokeI(lParam - SizeOf(Integer), hWnd) ; store handle before string
+    ProcedureReturn #False ; stop enumeration (found one)
+  EndIf
+
+  ProcedureReturn #True ; continue
+EndProcedure
+
+Procedure FindWindowPartial(partialTitle.s)
+  Protected result.i = 0
+  Protected mem = AllocateMemory(SizeOf(Integer) + StringByteLength(partialTitle) + 2)
+  If mem
+    PokeI(mem, 0)
+    PokeS(mem + SizeOf(Integer), partialTitle)
+    EnumWindows_(@EnumWindowsCallback(), mem + SizeOf(Integer))
+    result = PeekI(mem)
+    FreeMemory(mem)
+  EndIf
+  ProcedureReturn result
+EndProcedure
+
 Procedure EnsureSingleInstance()
   CompilerIf #PB_Compiler_OS = #PB_OS_Windows
     Global MutexHandle = CreateMutex_(#Null, #True, @"SulzerAssistantWebViewMutex")
     If GetLastError_() = #ERROR_ALREADY_EXISTS
       ; Another instance is running → find its window and bring it to front
-      hWnd = FindWindow_(#Null, @name)
+      Debug name 
+      hWnd = FindWindowPartial(name)
+      Debug "!!!!!!!!!"
+      Debug hWnd
       If hWnd = 0
         ; Fallback: try by title (less reliable, but safe)
         hWnd = FindWindow_("pb_window_0", #Null)  ; PureBasic main window class
@@ -1420,7 +1449,7 @@ Procedure.i IsModifierKey(vKey)
   EndSelect
 EndProcedure
 
-Procedure UpdateCapturedKeysDisplay()
+Procedure UpdateCapturedKeysDisplay(counter)
   ; Build display string from captured keys
   CapturedKeys = ""
   Protected first = #True
@@ -1457,11 +1486,25 @@ Procedure UpdateCapturedKeysDisplay()
     CapturedKeys + GetKeyName(RegularKeys())
     first = #False
   Next
+  Debug "UpdateCapturedKeysDisplay"
   
   SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+  
+  
+  counter+1
+  If counter <20
+    CreateThread(@UpdateCapturedKeysDisplay(),counter)
+  EndIf 
+  
 EndProcedure
 
 Procedure FinalizeCapture()
+;   If ListSize(CapturedVKs()) < 2
+;      CapturedKeys = "Invalid - at least 2 keys"
+;     ClearList(CapturedVKs())
+;     SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
+;   EndIf 
+  
   ; Stop capturing
   IsCapturing = #False
   CaptureTimerRunning = #False
@@ -1473,14 +1516,13 @@ Procedure FinalizeCapture()
   EndIf
   
   ; Validate the combination (at least 2 keys)
-  If ListSize(CapturedVKs()) < 2
-    CapturedKeys = "Invalid - at least 2 keys"
-    ClearList(CapturedVKs())
-    SetGadgetText(#STRING_SHORTCUT_DISPLAY, CapturedKeys)
-  EndIf
+  
+   
+  
   
   ; Remove focus from the input field so it can be clicked again
-  SetActiveGadget(#BTN_OK)
+    SetActiveGadget(#BTN_OK)
+    
 EndProcedure
 
 ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
@@ -1491,9 +1533,14 @@ ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
   Protected vKey = PeekL(lParam) & $FF
   Protected flags = PeekL(lParam + 8)
   Protected isDown = Bool(Not (flags & $80000000))
-  
+  Debug "SettingsKeyboardProc1"
   If IsCapturing
-    If isDown
+      Debug "SettingsKeyboardProc2"
+
+      If isDown
+          Debug "SettingsKeyboardProc3"
+
+        
       ; Key pressed down
       ; Check if we haven't exceeded max keys
       If ListSize(CapturedVKs()) >= #MAX_KEYS
@@ -1513,9 +1560,10 @@ ProcedureDLL.i SettingsKeyboardProc(nCode, wParam, lParam)
         AddElement(CapturedVKs())
         CapturedVKs() = vKey
       EndIf
-      
+        
       ; Update display
-      UpdateCapturedKeysDisplay()
+      CreateThread(@UpdateCapturedKeysDisplay(),0)
+      
       
       ; Reset the timer - we're waiting for more keys
       LastKeyPressTime = ElapsedMilliseconds()
@@ -1792,13 +1840,8 @@ Procedure MainLoop()
                 StopCapture()
                 
                 If ListSize(CapturedVKs()) > 0
-                  If ValidateShortcut()
                     SaveShortcut()
-                  Else
-                    MessageRequester("Error", "Please capture a valid shortcut (at least 2 keys) or click Cancel.", 
-                                     #PB_MessageRequester_Error)
-                    Break ; Don't close window
-                  EndIf
+                 
                 EndIf
                 
                 closedSettings = #True 
@@ -1814,7 +1857,7 @@ Procedure MainLoop()
             closedSettings = #True
         EndSelect
         
-        If closedSettings
+        If closedSettings    
           RemoveWindowTimer(#WINDOW_SETTINGS, 1)
           HideWindow(#WINDOW_SETTINGS, #True)
           
@@ -1851,8 +1894,8 @@ Procedure CleanUp()
 EndProcedure 
 
 ; IDE Options = PureBasic 6.21 (Windows - x64)
-; CursorPosition = 572
-; FirstLine = 559
+; CursorPosition = 388
+; FirstLine = 361
 ; Folding = --------------
 ; Optimizer
 ; EnableThread
